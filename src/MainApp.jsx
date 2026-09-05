@@ -5,7 +5,7 @@ import {
 import {
   Sun, Moon, Plus, Minus, X, Search, ArrowUpRight, ArrowDownLeft,
   Check, ChevronRight, Wallet, LayoutDashboard, ShoppingBag, History,
-  ArrowLeftRight, Cat, Coins, Receipt, LogOut, Send, Copy, Share2,
+  ArrowLeftRight, Cat, Coins, Receipt, LogOut, Send, Copy, Share2, Pencil,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -15,10 +15,9 @@ import { supabase } from "./lib/supabaseClient";
 
 const CATEGORIES = [
   { id: "semua", label: "Semua" },
-  { id: "roti", label: "Roti" },
-  { id: "pastry", label: "Pastry" },
-  { id: "kue", label: "Kue" },
-  { id: "kering", label: "Kue Kering" },
+  { id: "bolu", label: "Bolu" },
+  { id: "donat", label: "Donat" },
+  { id: "zuppa", label: "Zuppa" },
 ];
 
 /* ---------------------------------------------------------------- */
@@ -85,6 +84,12 @@ function todayInputDate() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toLocalDatetimeInputValue(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function formatTanggalLaporan(inputDate) {
@@ -321,6 +326,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   }, []);
   const [cart, setCart] = useState([]);
   const [sheet, setSheet] = useState(null);
+  const [editingTx, setEditingTx] = useState(null);
   const [lastSale, setLastSale] = useState(null);
   const [category, setCategory] = useState("semua");
   const [query, setQuery] = useState("");
@@ -454,6 +460,18 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     setTransactions([]);
   }
 
+  async function updateTransaction(id, patch) {
+    if (!isAdmin) return;
+    const { data, error } = await supabase.from("transactions").update(patch).eq("id", id).select().single();
+    if (error) {
+      alert("Gagal menyimpan perubahan riwayat: " + error.message);
+      return;
+    }
+    setTransactions((prev) => prev.map((t) => (t.id === id ? data : t)));
+    setEditingTx(null);
+    setSheet(null);
+  }
+
   async function addProduct(p) {
     const payload = { ...p, created_by: userId };
     const { data, error } = await supabase.from("products").insert(payload).select().single();
@@ -549,6 +567,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
                 grouped={grouped}
                 isAdmin={isAdmin}
                 onDelete={deleteTransaction}
+                onEdit={(tx) => { setEditingTx(tx); setSheet("editTx"); }}
                 onDeleteAll={deleteAllTransactions}
                 onOpenSheet={(s) => setSheet(s)}
               />
@@ -697,6 +716,15 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       <Sheet open={sheet === "laporan"} onClose={() => setSheet(null)} title="Laporan WhatsApp">
         <LaporanForm transactions={transactions} products={products} />
       </Sheet>
+
+      <Sheet open={sheet === "editTx"} onClose={() => { setSheet(null); setEditingTx(null); }} title="Edit Transaksi">
+        {editingTx && (
+          <EditTxForm
+            tx={editingTx}
+            onSubmit={(patch) => updateTransaction(editingTx.id, patch)}
+          />
+        )}
+      </Sheet>
     </>
   );
 }
@@ -835,6 +863,109 @@ function LaporanForm({ transactions, products }) {
           </span>
         </button>
       </div>
+    </div>
+  );
+}
+
+function EditTxForm({ tx, onSubmit }) {
+  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(tx.date));
+  const [note, setNote] = useState(tx.note || "");
+  const [total, setTotal] = useState(String(tx.total || ""));
+  const [hpp, setHpp] = useState(String(tx.hpp || ""));
+  const [amount, setAmount] = useState(String(tx.amount || ""));
+  const [wallet, setWallet] = useState(tx.wallet || "modal");
+  const [from, setFrom] = useState(tx.from || "modal");
+  const [to, setTo] = useState(tx.to || "keuntungan");
+
+  const numTotal = Number(String(total).replace(/\D/g, "")) || 0;
+  const numHpp = Number(String(hpp).replace(/\D/g, "")) || 0;
+  const numAmount = Number(String(amount).replace(/\D/g, "")) || 0;
+
+  function handleSubmit() {
+    const isoDate = new Date(dateVal).toISOString();
+    let patch = { date: isoDate, note: note || null };
+    if (tx.type === "penjualan") {
+      patch = { ...patch, total: numTotal, hpp: numHpp, profit: numTotal - numHpp };
+    } else if (tx.type === "pengeluaran") {
+      patch = { ...patch, amount: numAmount, wallet };
+    } else if (tx.type === "transfer") {
+      patch = { ...patch, amount: numAmount, from, to };
+    } else {
+      patch = { ...patch, amount: numAmount };
+    }
+    onSubmit(patch);
+  }
+
+  return (
+    <div className="mb-form">
+      <label className="mb-form-label">Tanggal &amp; Waktu</label>
+      <input
+        type="datetime-local"
+        className="mb-text-input"
+        style={{ marginBottom: 16 }}
+        value={dateVal}
+        onChange={(e) => setDateVal(e.target.value)}
+      />
+
+      {tx.type === "penjualan" ? (
+        <div className="mb-two-col" style={{ marginBottom: 16 }}>
+          <div>
+            <label className="mb-form-label">Total Penjualan</label>
+            <div className="mb-amount-input">
+              <span>Rp</span>
+              <input inputMode="numeric" value={numTotal ? numTotal.toLocaleString("id-ID") : ""} onChange={(e) => setTotal(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="mb-form-label">Modal (HPP)</label>
+            <div className="mb-amount-input">
+              <span>Rp</span>
+              <input inputMode="numeric" value={numHpp ? numHpp.toLocaleString("id-ID") : ""} onChange={(e) => setHpp(e.target.value)} />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <label className="mb-form-label">Jumlah</label>
+          <div className="mb-amount-input" style={{ marginBottom: 16 }}>
+            <span>Rp</span>
+            <input inputMode="numeric" value={numAmount ? numAmount.toLocaleString("id-ID") : ""} onChange={(e) => setAmount(e.target.value)} />
+          </div>
+        </>
+      )}
+
+      {tx.type === "pengeluaran" && (
+        <>
+          <label className="mb-form-label">Dompet</label>
+          <div className="mb-segment" style={{ marginBottom: 16 }}>
+            <button className={wallet === "modal" ? "active" : ""} onClick={() => setWallet("modal")}>Dompet Modal</button>
+            <button className={wallet === "keuntungan" ? "active" : ""} onClick={() => setWallet("keuntungan")}>Dompet Keuntungan</button>
+          </div>
+        </>
+      )}
+
+      {tx.type === "transfer" && (
+        <>
+          <label className="mb-form-label">Arah Transfer</label>
+          <div className="mb-segment" style={{ marginBottom: 16 }}>
+            <button className={from === "modal" ? "active" : ""} onClick={() => { setFrom("modal"); setTo("keuntungan"); }}>Modal → Keuntungan</button>
+            <button className={from === "keuntungan" ? "active" : ""} onClick={() => { setFrom("keuntungan"); setTo("modal"); }}>Keuntungan → Modal</button>
+          </div>
+        </>
+      )}
+
+      <label className="mb-form-label">Catatan</label>
+      <input
+        className="mb-text-input"
+        style={{ marginBottom: 18 }}
+        placeholder="Catatan (opsional)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+
+      <button className="mb-submit-btn" style={{ "--accent": "var(--gold)" }} onClick={handleSubmit}>
+        Simpan Perubahan
+      </button>
     </div>
   );
 }
@@ -1014,7 +1145,7 @@ function Dompet({ wallets, walletTab, setWalletTab, walletTxs, onOpenSheet }) {
   );
 }
 
-function Riwayat({ grouped, isAdmin, onDelete, onDeleteAll, onOpenSheet }) {
+function Riwayat({ grouped, isAdmin, onDelete, onEdit, onDeleteAll, onOpenSheet }) {
   return (
     <div className="mb-screen">
       <div className="mb-riwayat-head">
@@ -1034,14 +1165,14 @@ function Riwayat({ grouped, isAdmin, onDelete, onDeleteAll, onOpenSheet }) {
       {grouped.map(([key, txs]) => (
         <div key={key} className="mb-history-group">
           <div className="mb-history-label">{dateLabel(txs[0].date)}</div>
-          <TxList items={txs} isAdmin={isAdmin} onDelete={onDelete} />
+          <TxList items={txs} isAdmin={isAdmin} onDelete={onDelete} onEdit={onEdit} />
         </div>
       ))}
     </div>
   );
 }
 
-function TxList({ items, isAdmin, onDelete }) {
+function TxList({ items, isAdmin, onDelete, onEdit }) {
   if (items.length === 0) return <div className="mb-empty"><Receipt size={26} /><p>Belum ada transaksi</p></div>;
   return (
     <div className="mb-tx-list">
@@ -1056,6 +1187,11 @@ function TxList({ items, isAdmin, onDelete }) {
               <div className="mb-tx-sub">{dateTimeLabel(tx.date)} · {meta.sub}</div>
             </div>
             <div className={`mb-tx-amount ${meta.dir}`}>{meta.dir === "in" ? "+" : meta.dir === "out" ? "-" : ""}{rupiah(meta.amount)}</div>
+            {isAdmin && onEdit && (
+              <button className="mb-tx-edit" onClick={() => onEdit(tx)} aria-label="Edit riwayat">
+                <Pencil size={13} />
+              </button>
+            )}
             {isAdmin && onDelete && (
               <button className="mb-tx-delete" onClick={() => onDelete(tx.id)} aria-label="Hapus riwayat">
                 <X size={13} />
