@@ -104,7 +104,7 @@ function fmtAngka(n) {
   return Math.round(n || 0).toLocaleString("id-ID");
 }
 
-function buildLaporanText({ inputDate, unit, transactions, products }) {
+function buildLaporanText({ inputDate, transactions, products }) {
   const dayTx = transactions.filter((tx) => {
     const d = new Date(tx.date);
     const pad = (n) => String(n).padStart(2, "0");
@@ -130,7 +130,15 @@ function buildLaporanText({ inputDate, unit, transactions, products }) {
     }
   });
 
-  const expenseTx = dayTx.filter((tx) => tx.type === "pengeluaran" || tx.type === "tarik_keuntungan");
+  // Pengeluaran dari Dompet Modal (mis. belanja bahan baku) dipisah:
+  // ditampilkan sebagai "Belanja Bahan" tapi TIDAK mengurangi Serahan.
+  const belanjaBahanTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
+  const belanjaBahanTotal = belanjaBahanTx.reduce((s, tx) => s + tx.amount, 0);
+
+  // Pengeluaran dari Dompet Keuntungan & tarik keuntungan -> mengurangi Serahan.
+  const expenseTx = dayTx.filter(
+    (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
+  );
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
   const serahanNum = omset - keluaran;
 
@@ -143,15 +151,16 @@ function buildLaporanText({ inputDate, unit, transactions, products }) {
     .concat(lainnya > 0 ? [`- ${"Lainnya".padEnd(labelWidth)}= ${fmtAngka(lainnya)}`] : [])
     .join("\n");
 
-  const expLabelWidth = Math.max(14, ...expenseTx.map((tx) => (tx.note || "Pengeluaran").length)) + 1;
-  const expenseLinesText = expenseTx.length
-    ? expenseTx
-        .map((tx) => {
-          const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
-          return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
-        })
-        .join("\n")
-    : "(Tiada pengeluaran)";
+  const expLabels = expenseTx.map((tx) => tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"));
+  const expLabelWidth = Math.max(14, "Belanja Bahan".length, ...expLabels.map((l) => l.length)) + 1;
+  const expenseLines = expenseTx.map((tx) => {
+    const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
+    return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
+  });
+  if (belanjaBahanTotal > 0) {
+    expenseLines.push(`${"Belanja Bahan".padEnd(expLabelWidth)}= ${fmtAngka(belanjaBahanTotal)}`);
+  }
+  const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
 
   const serahanText = serahanNum > 0 ? fmtAngka(serahanNum) : "TIADA";
 
@@ -160,7 +169,7 @@ function buildLaporanText({ inputDate, unit, transactions, products }) {
 _LAPORAN OMSET PREMIS_
 \`\`\`
 TARIKH : ${formatTanggalLaporan(inputDate)}
-UNIT   : ${unit || "-"}
+UNIT   : MATARAM BAKERY
 ${catLines}
 •••••••••••••••••••••
 Rincian Pengeluaran :
@@ -792,13 +801,12 @@ function AddProductForm({ onSubmit }) {
 
 function LaporanForm({ transactions, products }) {
   const [inputDate, setInputDate] = useState(todayInputDate());
-  const [unit, setUnit] = useState("BAKERY");
   const [phone, setPhone] = useState("");
   const [copied, setCopied] = useState(false);
 
   const text = useMemo(
-    () => buildLaporanText({ inputDate, unit, transactions, products }),
-    [inputDate, unit, transactions, products]
+    () => buildLaporanText({ inputDate, transactions, products }),
+    [inputDate, transactions, products]
   );
 
   function kirimWhatsApp() {
@@ -819,26 +827,14 @@ function LaporanForm({ transactions, products }) {
 
   return (
     <div className="mb-form">
-      <div className="mb-two-col" style={{ marginBottom: 14 }}>
-        <div>
-          <label className="mb-form-label">Tanggal</label>
-          <input
-            type="date"
-            className="mb-text-input"
-            value={inputDate}
-            onChange={(e) => setInputDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="mb-form-label">Unit</label>
-          <input
-            className="mb-text-input"
-            placeholder="mis. BAKERY"
-            value={unit}
-            onChange={(e) => setUnit(e.target.value.toUpperCase())}
-          />
-        </div>
-      </div>
+      <label className="mb-form-label">Tanggal</label>
+      <input
+        type="date"
+        className="mb-text-input"
+        style={{ marginBottom: 14 }}
+        value={inputDate}
+        onChange={(e) => setInputDate(e.target.value)}
+      />
 
       <label className="mb-form-label">Nomor WhatsApp Tujuan (opsional)</label>
       <input

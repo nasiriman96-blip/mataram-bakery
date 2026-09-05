@@ -246,6 +246,12 @@ button, input, select, textarea {
   transition: transform .15s ease;
 }
 .mb-tx-delete:active { transform: scale(0.85); }
+.mb-tx-edit {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--gold-soft); color: var(--gold);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-left: 6px;
+  transition: transform .15s ease;
+}
+.mb-tx-edit:active { transform: scale(0.85); }
 
 /* Tambahan: badge admin di header */
 .mb-admin-badge {
