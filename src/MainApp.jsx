@@ -147,10 +147,12 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
   catList.forEach((c) => { catTotals[c.id] = 0; });
   let lainnya = 0;
   let omset = 0;
+  let belanjaBahanTotal = 0; // total HPP/modal barang yang terjual hari itu
 
   dayTx.forEach((tx) => {
     if (tx.type === "penjualan") {
       omset += tx.total;
+      belanjaBahanTotal += tx.hpp || 0;
       (tx.items || []).forEach((it) => {
         const prod = products.find((p) => p.id === it.id);
         const amt = it.price * it.qty;
@@ -160,13 +162,9 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
     }
   });
 
-  // Uang Modal (Dompet Modal) = belanja bahan baku, dsb. Ditampilkan di Rincian
-  // Pengeluaran dengan keterangan "Belanja Bahan", TAPI tidak mengurangi Serahan.
-  const belanjaBahanTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
-  const belanjaBahanTotal = belanjaBahanTx.reduce((s, tx) => s + tx.amount, 0);
-
   // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
   // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
+  // Uang modal (Belanja Bahan) TIDAK ikut mengurangi Serahan.
   const expenseTx = dayTx.filter(
     (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
   );
@@ -920,7 +918,6 @@ function ManualItemForm({ onSubmit }) {
 
 function LaporanForm({ transactions, products }) {
   const [inputDate, setInputDate] = useState(todayInputDate());
-  const [phone, setPhone] = useState("");
   const [serahanInput, setSerahanInput] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -940,9 +937,7 @@ function LaporanForm({ transactions, products }) {
   );
 
   function kirimWhatsApp() {
-    const nomor = phone.replace(/\D/g, "");
-    const url = nomor ? `https://wa.me/${nomor}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   }
 
   async function salinTeks() {
@@ -965,16 +960,6 @@ function LaporanForm({ transactions, products }) {
         value={inputDate}
         onChange={(e) => setInputDate(e.target.value)}
       />
-
-      <label className="mb-form-label">Nomor WhatsApp Tujuan (opsional)</label>
-      <input
-        className="mb-text-input"
-        style={{ marginBottom: 6 }}
-        placeholder="mis. 6281234567890 (kosongkan untuk pilih kontak)"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-      />
-      <p className="mb-form-helper">Kosongkan untuk memilih penerima langsung dari WhatsApp.</p>
 
       <label className="mb-form-label">Serahan</label>
       <div className="mb-amount-input" style={{ marginBottom: 6 }}>
