@@ -313,11 +313,20 @@ function Sheet({ open, onClose, title, children }) {
 function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, helper }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
+  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
   const numeric = Number(amount.replace(/\D/g, "")) || 0;
 
   return (
     <div className="mb-form">
       {helper && <p className="mb-form-helper">{helper}</p>}
+      <label className="mb-form-label">Tanggal & Waktu</label>
+      <input
+        type="datetime-local"
+        className="mb-text-input"
+        style={{ marginBottom: 14 }}
+        value={dateVal}
+        onChange={(e) => setDateVal(e.target.value)}
+      />
       <label className="mb-form-label">Jumlah</label>
       <div className="mb-amount-input" style={{ "--accent": accent }}>
         <span>Rp</span>
@@ -336,7 +345,11 @@ function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, h
         className="mb-submit-btn"
         style={{ "--accent": accent }}
         disabled={numeric <= 0}
-        onClick={() => { onSubmit(numeric, note); setAmount(""); setNote(""); }}
+        onClick={() => {
+          onSubmit(numeric, note, new Date(dateVal).toISOString());
+          setAmount("");
+          setNote("");
+        }}
       >
         {submitLabel}
       </button>
@@ -390,6 +403,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     };
   }, []);
   const [cart, setCart] = useState([]);
+  const [saleDate, setSaleDate] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
   const [sheet, setSheet] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
   const [lastSale, setLastSale] = useState(null);
@@ -482,7 +496,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     if (cartItems.length === 0) return;
     const payload = {
       type: "penjualan",
-      date: new Date().toISOString(),
+      date: new Date(saleDate).toISOString(),
       total: cartTotal,
       hpp: cartCost,
       profit: cartTotal - cartCost,
@@ -497,6 +511,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     setTransactions((prev) => [data, ...prev]);
     setLastSale(data);
     setCart([]);
+    setSaleDate(toLocalDatetimeInputValue(new Date().toISOString()));
     setSheet("success");
   }
 
@@ -703,6 +718,14 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
               <Plus size={16} /> Tambah Item Manual
             </button>
             <div className="mb-cart-summary">
+              <label className="mb-form-label">Tanggal & Waktu Transaksi</label>
+              <input
+                type="datetime-local"
+                className="mb-text-input"
+                style={{ marginBottom: 12 }}
+                value={saleDate}
+                onChange={(e) => setSaleDate(e.target.value)}
+              />
               <div className="mb-summary-row"><span>Subtotal</span><span>{rupiah(cartTotal)}</span></div>
               <div className="mb-summary-row muted"><span>Estimasi keuntungan</span><span>{rupiah(cartTotal - cartCost)}</span></div>
               <button className="mb-submit-btn" style={{ "--accent": "var(--gold)" }} onClick={checkout}>
@@ -743,7 +766,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           quickAmounts={[100000, 500000, 1000000, 2000000]}
           noteholder="mis. tambahan modal dari pemilik"
           submitLabel="Setor ke Dompet Modal"
-          onSubmit={(amount, note) => { pushTx({ type: "setor_modal", amount, note }); setSheet(null); }}
+          onSubmit={(amount, note, dateIso) => { pushTx({ type: "setor_modal", amount, note, date: dateIso }); setSheet(null); }}
         />
       </Sheet>
 
@@ -754,7 +777,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           noteholder="mis. ambil keuntungan bulanan"
           submitLabel="Tarik dari Dompet Keuntungan"
           helper={`Saldo tersedia ${rupiah(wallets.keuntungan)}`}
-          onSubmit={(amount, note) => { pushTx({ type: "tarik_keuntungan", amount, note }); setSheet(null); }}
+          onSubmit={(amount, note, dateIso) => { pushTx({ type: "tarik_keuntungan", amount, note, date: dateIso }); setSheet(null); }}
         />
       </Sheet>
 
@@ -768,7 +791,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           quickAmounts={[25000, 50000, 100000, 250000]}
           noteholder="mis. beli bahan baku"
           submitLabel="Catat Pengeluaran"
-          onSubmit={(amount, note) => { pushTx({ type: "pengeluaran", amount, note, wallet: expenseWallet }); setSheet(null); }}
+          onSubmit={(amount, note, dateIso) => { pushTx({ type: "pengeluaran", amount, note, wallet: expenseWallet, date: dateIso }); setSheet(null); }}
         />
       </Sheet>
 
@@ -782,10 +805,10 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           quickAmounts={[50000, 100000, 250000, 500000]}
           noteholder="mis. penyesuaian saldo"
           submitLabel="Transfer Sekarang"
-          onSubmit={(amount, note) => {
+          onSubmit={(amount, note, dateIso) => {
             const from = transferDir === "modal_to_keuntungan" ? "modal" : "keuntungan";
             const to = transferDir === "modal_to_keuntungan" ? "keuntungan" : "modal";
-            pushTx({ type: "transfer", amount, note, from, to });
+            pushTx({ type: "transfer", amount, note, from, to, date: dateIso });
             setSheet(null);
           }}
         />
