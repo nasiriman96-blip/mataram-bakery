@@ -181,24 +181,28 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
   });
 
   const labelWidth = Math.max(12, ...catList.map((c) => c.label.length), "Lainnya".length) + 1;
-  const catLines = catList
-    .map((c) => {
-      const total = catTotals[c.id];
-      return `- ${c.label.padEnd(labelWidth)}= ${total > 0 ? fmtAngka(total) : "-"}`;
-    })
-    .concat(lainnya > 0 ? [`- ${"Lainnya".padEnd(labelWidth)}= ${fmtAngka(lainnya)}`] : [])
+  const catEntries = catList.map((c) => ({
+    label: c.label,
+    valueText: catTotals[c.id] > 0 ? fmtAngka(catTotals[c.id]) : "-",
+  }));
+  if (lainnya > 0) catEntries.push({ label: "Lainnya", valueText: fmtAngka(lainnya) });
+  const catValWidth = Math.max(...catEntries.map((e) => e.valueText.length));
+  const catLines = catEntries
+    .map((e) => `- ${e.label.padEnd(labelWidth)}= ${e.valueText.padStart(catValWidth)}`)
     .join("\n");
 
-  const expLabels = expenseTx.map((tx) => tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"));
-  const expLabelWidth = Math.max(14, "Belanja Bahan".length, ...expLabels.map((l) => l.length)) + 1;
-  const expenseLines = expenseTx.map((tx) => {
-    const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
-    return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
-  });
+  const expEntries = expenseTx.map((tx) => ({
+    label: tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"),
+    valueText: fmtAngka(tx.amount),
+  }));
   if (belanjaBahanTotal > 0) {
-    expenseLines.push(`${"Belanja Bahan".padEnd(expLabelWidth)}= ${fmtAngka(belanjaBahanTotal)}`);
+    expEntries.push({ label: "Belanja Bahan", valueText: fmtAngka(belanjaBahanTotal) });
   }
-  const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
+  const expLabelWidth = Math.max(14, ...expEntries.map((e) => e.label.length)) + 1;
+  const expValWidth = expEntries.length ? Math.max(...expEntries.map((e) => e.valueText.length)) : 0;
+  const expenseLinesText = expEntries.length
+    ? expEntries.map((e) => `${e.label.padEnd(expLabelWidth)}= ${e.valueText.padStart(expValWidth)}`).join("\n")
+    : "(Tiada pengeluaran)";
 
   const totalKeluaran = keluaran + belanjaBahanTotal;
   const serahanAuto = omset - totalKeluaran;
@@ -208,6 +212,10 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
     : serahanAuto > 0
     ? fmtAngka(serahanAuto)
     : "TIADA";
+
+  const omsetText = fmtAngka(omset);
+  const totalKeluaranText = fmtAngka(totalKeluaran);
+  const summaryValWidth = Math.max(omsetText.length, totalKeluaranText.length, serahanText.length);
 
   return `*MOHON IZIN KONGSIKAN*
 
@@ -221,11 +229,11 @@ Rincian Pengeluaran :
 
 ${expenseLinesText}
 
-TOTAL KELUARAN  = ${fmtAngka(totalKeluaran)}
+TOTAL KELUARAN  = ${totalKeluaranText.padStart(summaryValWidth)}
 ••••••••••••••••••••
-OMSET         = ${fmtAngka(omset)}
-KELUARAN      = ${fmtAngka(totalKeluaran)}
-SERAHAN       = ${serahanText}
+OMSET         = ${omsetText.padStart(summaryValWidth)}
+KELUARAN      = ${totalKeluaranText.padStart(summaryValWidth)}
+SERAHAN       = ${serahanText.padStart(summaryValWidth)}
 \`\`\`
 *YA ALLAH TLG LAH*`;
 }
