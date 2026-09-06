@@ -165,11 +165,18 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
   // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
   // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
   // Uang modal (Belanja Bahan) TIDAK ikut mengurangi Serahan.
-  // Transfer antar dompet TIDAK dimasukkan ke laporan WhatsApp.
   const expenseTx = dayTx.filter(
     (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
   );
-  const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
+
+  // Transfer antar dompet TIDAK ditampilkan sebagai baris di laporan, tapi kalau
+  // transfer KELUAR dari Dompet Keuntungan, nominalnya tetap mengurangi Serahan
+  // (karena uang itu sudah tidak ada lagi di Dompet Keuntungan hari itu).
+  const transferKeluarKeuntungan = dayTx
+    .filter((tx) => tx.type === "transfer" && tx.from === "keuntungan")
+    .reduce((s, tx) => s + tx.amount, 0);
+
+  const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0) + transferKeluarKeuntungan;
 
   return { catList, catTotals, lainnya, omset, expenseTx, keluaran, belanjaBahanTotal };
 }
