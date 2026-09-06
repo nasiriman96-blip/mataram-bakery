@@ -200,7 +200,8 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
   }
   const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
 
-  const serahanAuto = omset - belanjaBahanTotal - keluaran;
+  const totalKeluaran = keluaran + belanjaBahanTotal;
+  const serahanAuto = omset - totalKeluaran;
   const hasOverride = serahanOverride !== null && serahanOverride !== undefined && serahanOverride !== "";
   const serahanText = hasOverride
     ? fmtAngka(Number(serahanOverride))
@@ -220,10 +221,10 @@ Rincian Pengeluaran :
 
 ${expenseLinesText}
 
-TOTAL KELUARAN  = ${fmtAngka(keluaran)}
+TOTAL KELUARAN  = ${fmtAngka(totalKeluaran)}
 ••••••••••••••••••••
 OMSET         = ${fmtAngka(omset)}
-KELUARAN      = ${fmtAngka(keluaran)}
+KELUARAN      = ${fmtAngka(totalKeluaran)}
 SERAHAN       = ${serahanText}
 \`\`\`
 *YA ALLAH TLG LAH*`;
@@ -929,7 +930,7 @@ function LaporanForm({ transactions, products }) {
     () => computeLaporanNumbers({ inputDate, transactions, products }),
     [inputDate, transactions, products]
   );
-  const serahanAuto = omset - belanjaBahanTotal - keluaran;
+  const serahanAuto = omset - (keluaran + belanjaBahanTotal);
 
   const text = useMemo(
     () => buildLaporanText({ inputDate, transactions, products, serahanOverride: serahanInput || null }),
