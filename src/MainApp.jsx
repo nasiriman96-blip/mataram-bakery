@@ -163,10 +163,14 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
   });
 
   // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
-  // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
+  // Keuntungan + Tarik Keuntungan + Transfer KELUAR dari Dompet Keuntungan
+  // semuanya mengurangi jumlah yang diserahkan.
   // Uang modal (Belanja Bahan) TIDAK ikut mengurangi Serahan.
   const expenseTx = dayTx.filter(
-    (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
+    (tx) =>
+      (tx.type === "pengeluaran" && tx.wallet !== "modal") ||
+      tx.type === "tarik_keuntungan" ||
+      (tx.type === "transfer" && tx.from === "keuntungan")
   );
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
 
@@ -192,7 +196,13 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
     .join("\n");
 
   const expEntries = expenseTx.map((tx) => ({
-    label: tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"),
+    label:
+      tx.note ||
+      (tx.type === "tarik_keuntungan"
+        ? "Tarik Keuntungan"
+        : tx.type === "transfer"
+        ? "Transfer ke Modal"
+        : "Pengeluaran"),
     valueText: fmtAngka(tx.amount),
   }));
   if (belanjaBahanTotal > 0) {
