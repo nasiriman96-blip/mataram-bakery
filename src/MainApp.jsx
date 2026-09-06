@@ -200,7 +200,7 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
   }
   const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
 
-  const serahanAuto = omset - keluaran;
+  const serahanAuto = omset - belanjaBahanTotal - keluaran;
   const hasOverride = serahanOverride !== null && serahanOverride !== undefined && serahanOverride !== "";
   const serahanText = hasOverride
     ? fmtAngka(Number(serahanOverride))
@@ -925,11 +925,11 @@ function LaporanForm({ transactions, products }) {
     setSerahanInput("");
   }, [inputDate]);
 
-  const { omset, keluaran } = useMemo(
+  const { omset, keluaran, belanjaBahanTotal } = useMemo(
     () => computeLaporanNumbers({ inputDate, transactions, products }),
     [inputDate, transactions, products]
   );
-  const serahanAuto = omset - keluaran;
+  const serahanAuto = omset - belanjaBahanTotal - keluaran;
 
   const text = useMemo(
     () => buildLaporanText({ inputDate, transactions, products, serahanOverride: serahanInput || null }),
