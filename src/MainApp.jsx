@@ -104,7 +104,37 @@ function fmtAngka(n) {
   return Math.round(n || 0).toLocaleString("id-ID");
 }
 
-function buildLaporanText({ inputDate, transactions, products }) {
+/**
+ * Input nominal Rupiah yang aman dipakai di HP.
+ * Selalu memaksa kursor ke akhir teks setiap kali berubah, supaya angka
+ * tidak "tersisip" di tengah saat React memformat ulang tampilannya
+ * (mis. menambah titik ribuan) — masalah umum di keyboard angka HP.
+ */
+function RupiahInput({ value, onChange, placeholder }) {
+  const ref = useRef(null);
+  const numeric = value ? Number(String(value).replace(/\D/g, "")) : 0;
+  const display = value ? numeric.toLocaleString("id-ID") : "";
+
+  useEffect(() => {
+    const el = ref.current;
+    if (el && document.activeElement === el) {
+      const end = el.value.length;
+      el.setSelectionRange(end, end);
+    }
+  }, [display]);
+
+  return (
+    <input
+      ref={ref}
+      inputMode="numeric"
+      placeholder={placeholder || "0"}
+      value={display}
+      onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))}
+    />
+  );
+}
+
+function computeLaporanNumbers({ inputDate, transactions, products }) {
   const dayTx = transactions.filter((tx) => {
     const d = new Date(tx.date);
     const pad = (n) => String(n).padStart(2, "0");
@@ -130,17 +160,18 @@ function buildLaporanText({ inputDate, transactions, products }) {
     }
   });
 
-  // Pengeluaran dari Dompet Modal (mis. belanja bahan baku) dipisah:
-  // ditampilkan sebagai "Belanja Bahan" tapi TIDAK mengurangi Serahan.
-  const belanjaBahanTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
-  const belanjaBahanTotal = belanjaBahanTx.reduce((s, tx) => s + tx.amount, 0);
-
-  // Pengeluaran dari Dompet Keuntungan & tarik keuntungan -> mengurangi Serahan.
-  const expenseTx = dayTx.filter(
-    (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
-  );
+  const expenseTx = dayTx.filter((tx) => tx.type === "pengeluaran" || tx.type === "tarik_keuntungan");
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
-  const serahanNum = omset - keluaran;
+
+  return { catList, catTotals, lainnya, omset, expenseTx, keluaran };
+}
+
+function buildLaporanText({ inputDate, transactions, products, serahanOverride }) {
+  const { catList, catTotals, lainnya, omset, expenseTx, keluaran } = computeLaporanNumbers({
+    inputDate,
+    transactions,
+    products,
+  });
 
   const labelWidth = Math.max(12, ...catList.map((c) => c.label.length), "Lainnya".length) + 1;
   const catLines = catList
@@ -151,18 +182,23 @@ function buildLaporanText({ inputDate, transactions, products }) {
     .concat(lainnya > 0 ? [`- ${"Lainnya".padEnd(labelWidth)}= ${fmtAngka(lainnya)}`] : [])
     .join("\n");
 
-  const expLabels = expenseTx.map((tx) => tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"));
-  const expLabelWidth = Math.max(14, "Belanja Bahan".length, ...expLabels.map((l) => l.length)) + 1;
-  const expenseLines = expenseTx.map((tx) => {
-    const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
-    return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
-  });
-  if (belanjaBahanTotal > 0) {
-    expenseLines.push(`${"Belanja Bahan".padEnd(expLabelWidth)}= ${fmtAngka(belanjaBahanTotal)}`);
-  }
-  const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
+  const expLabelWidth = Math.max(14, ...expenseTx.map((tx) => (tx.note || "Pengeluaran").length)) + 1;
+  const expenseLinesText = expenseTx.length
+    ? expenseTx
+        .map((tx) => {
+          const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
+          return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
+        })
+        .join("\n")
+    : "(Tiada pengeluaran)";
 
-  const serahanText = serahanNum > 0 ? fmtAngka(serahanNum) : "TIADA";
+  const serahanAuto = omset - keluaran;
+  const hasOverride = serahanOverride !== null && serahanOverride !== undefined && serahanOverride !== "";
+  const serahanText = hasOverride
+    ? fmtAngka(Number(serahanOverride))
+    : serahanAuto > 0
+    ? fmtAngka(serahanAuto)
+    : "TIADA";
 
   return `*MOHON IZIN KONGSIKAN*
 
@@ -260,12 +296,7 @@ function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, h
       <label className="mb-form-label">Jumlah</label>
       <div className="mb-amount-input" style={{ "--accent": accent }}>
         <span>Rp</span>
-        <input
-          inputMode="numeric"
-          placeholder="0"
-          value={amount ? Number(amount.replace(/\D/g, "")).toLocaleString("id-ID") : ""}
-          onChange={(e) => setAmount(e.target.value)}
-        />
+        <RupiahInput value={amount} onChange={setAmount} placeholder="0" />
       </div>
       <div className="mb-quick-row">
         {quickAmounts.map((q) => (
@@ -395,7 +426,10 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     return transactions.filter((tx) => tx.type === "penjualan" && new Date(tx.date).toDateString() === today).length;
   }, [transactions]);
 
-  const cartItems = cart.map((c) => ({ ...products.find((p) => p.id === c.id), qty: c.qty }));
+  const cartItems = cart.map((c) => {
+    if (c.manual) return { id: c.id, name: c.name, price: c.price, cost: c.cost || 0, kind: "manual", qty: c.qty };
+    return { ...(products.find((p) => p.id === c.id) || {}), qty: c.qty };
+  });
   const cartTotal = cartItems.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCost = cartItems.reduce((s, i) => s + i.cost * i.qty, 0);
   const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
@@ -406,6 +440,10 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       if (existing) return prev.map((c) => (c.id === id ? { ...c, qty: c.qty + 1 } : c));
       return [...prev, { id, qty: 1 }];
     });
+  }
+  function addManualItem({ name, price, cost, qty }) {
+    const id = `manual-${Date.now()}`;
+    setCart((prev) => [...prev, { id, manual: true, name, price, cost: cost || 0, qty: qty || 1 }]);
   }
   function changeQty(id, delta) {
     setCart((prev) =>
@@ -614,6 +652,9 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           <div className="mb-empty">
             <ShoppingBag size={32} />
             <p>Keranjang kosong</p>
+            <button className="mb-action-btn gold" style={{ marginTop: 14 }} onClick={() => setSheet("manualItem")}>
+              <Plus size={16} /> Tambah Item Manual
+            </button>
           </div>
         ) : (
           <>
@@ -633,6 +674,9 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
                 </div>
               ))}
             </div>
+            <button className="mb-action-btn gold" style={{ margin: "4px 0 14px" }} onClick={() => setSheet("manualItem")}>
+              <Plus size={16} /> Tambah Item Manual
+            </button>
             <div className="mb-cart-summary">
               <div className="mb-summary-row"><span>Subtotal</span><span>{rupiah(cartTotal)}</span></div>
               <div className="mb-summary-row muted"><span>Estimasi keuntungan</span><span>{rupiah(cartTotal - cartCost)}</span></div>
@@ -642,6 +686,10 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
             </div>
           </>
         )}
+      </Sheet>
+
+      <Sheet open={sheet === "manualItem"} onClose={() => setSheet("cart")} title="Tambah Item Manual">
+        <ManualItemForm onSubmit={(item) => { addManualItem(item); setSheet("cart"); }} />
       </Sheet>
 
       <Sheet open={sheet === "success"} onClose={() => setSheet(null)} title="">
@@ -740,7 +788,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
 
 function AddProductForm({ onSubmit }) {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("roti");
+  const [category, setCategory] = useState("bolu");
   const [kind, setKind] = useState("bread");
   const [cost, setCost] = useState("");
   const [price, setPrice] = useState("");
@@ -775,14 +823,14 @@ function AddProductForm({ onSubmit }) {
           <label className="mb-form-label">Harga Modal</label>
           <div className="mb-amount-input" style={{ "--accent": "var(--teal)" }}>
             <span>Rp</span>
-            <input inputMode="numeric" placeholder="0" value={cost ? costNum.toLocaleString("id-ID") : ""} onChange={(e) => setCost(e.target.value)} />
+            <RupiahInput value={cost} onChange={setCost} />
           </div>
         </div>
         <div>
           <label className="mb-form-label">Harga Jual</label>
           <div className="mb-amount-input" style={{ "--accent": "var(--gold)" }}>
             <span>Rp</span>
-            <input inputMode="numeric" placeholder="0" value={price ? priceNum.toLocaleString("id-ID") : ""} onChange={(e) => setPrice(e.target.value)} />
+            <RupiahInput value={price} onChange={setPrice} />
           </div>
         </div>
       </div>
@@ -799,14 +847,86 @@ function AddProductForm({ onSubmit }) {
   );
 }
 
+function ManualItemForm({ onSubmit }) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [cost, setCost] = useState("");
+  const [qty, setQty] = useState(1);
+
+  const priceNum = Number(price.replace(/\D/g, "")) || 0;
+  const costNum = Number(cost.replace(/\D/g, "")) || 0;
+  const valid = name.trim().length > 0 && priceNum > 0;
+
+  return (
+    <div className="mb-form">
+      <p className="mb-form-helper" style={{ marginBottom: 14 }}>
+        Untuk barang yang belum ada di menu, misalnya pesanan custom.
+      </p>
+
+      <label className="mb-form-label">Nama Barang</label>
+      <input
+        className="mb-text-input"
+        style={{ marginBottom: 14 }}
+        placeholder="mis. Kue Custom Ulang Tahun"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+
+      <div className="mb-two-col" style={{ marginBottom: 14 }}>
+        <div>
+          <label className="mb-form-label">Harga Jual</label>
+          <div className="mb-amount-input" style={{ "--accent": "var(--gold)" }}>
+            <span>Rp</span>
+            <RupiahInput value={price} onChange={setPrice} />
+          </div>
+        </div>
+        <div>
+          <label className="mb-form-label">Harga Modal (opsional)</label>
+          <div className="mb-amount-input" style={{ "--accent": "var(--teal)" }}>
+            <span>Rp</span>
+            <RupiahInput value={cost} onChange={setCost} />
+          </div>
+        </div>
+      </div>
+
+      <label className="mb-form-label">Jumlah</label>
+      <div className="mb-qty" style={{ marginBottom: 20, alignSelf: "flex-start" }}>
+        <button onClick={() => setQty((q) => Math.max(1, q - 1))}><Minus size={14} /></button>
+        <span>{qty}</span>
+        <button onClick={() => setQty((q) => q + 1)}><Plus size={14} /></button>
+      </div>
+
+      <button
+        className="mb-submit-btn"
+        style={{ "--accent": "var(--gold)" }}
+        disabled={!valid}
+        onClick={() => onSubmit({ name: name.trim(), price: priceNum, cost: costNum, qty })}
+      >
+        Tambah ke Keranjang
+      </button>
+    </div>
+  );
+}
+
 function LaporanForm({ transactions, products }) {
   const [inputDate, setInputDate] = useState(todayInputDate());
   const [phone, setPhone] = useState("");
+  const [serahanInput, setSerahanInput] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const text = useMemo(
-    () => buildLaporanText({ inputDate, transactions, products }),
+  useEffect(() => {
+    setSerahanInput("");
+  }, [inputDate]);
+
+  const { omset, keluaran } = useMemo(
+    () => computeLaporanNumbers({ inputDate, transactions, products }),
     [inputDate, transactions, products]
+  );
+  const serahanAuto = omset - keluaran;
+
+  const text = useMemo(
+    () => buildLaporanText({ inputDate, transactions, products, serahanOverride: serahanInput || null }),
+    [inputDate, transactions, products, serahanInput]
   );
 
   function kirimWhatsApp() {
@@ -845,6 +965,15 @@ function LaporanForm({ transactions, products }) {
         onChange={(e) => setPhone(e.target.value)}
       />
       <p className="mb-form-helper">Kosongkan untuk memilih penerima langsung dari WhatsApp.</p>
+
+      <label className="mb-form-label">Serahan</label>
+      <div className="mb-amount-input" style={{ marginBottom: 6 }}>
+        <span>Rp</span>
+        <RupiahInput value={serahanInput} onChange={setSerahanInput} placeholder={fmtAngka(serahanAuto)} />
+      </div>
+      <p className="mb-form-helper" style={{ marginBottom: 14 }}>
+        Otomatis: Rp {fmtAngka(serahanAuto)} (Omset dikurangi Keluaran). Isi kotak ini kalau mau ubah manual.
+      </p>
 
       <label className="mb-form-label">Pratinjau Laporan</label>
       <pre className="mb-laporan-preview">{text}</pre>
@@ -909,14 +1038,14 @@ function EditTxForm({ tx, onSubmit }) {
             <label className="mb-form-label">Total Penjualan</label>
             <div className="mb-amount-input">
               <span>Rp</span>
-              <input inputMode="numeric" value={numTotal ? numTotal.toLocaleString("id-ID") : ""} onChange={(e) => setTotal(e.target.value)} />
+              <RupiahInput value={total} onChange={setTotal} />
             </div>
           </div>
           <div>
             <label className="mb-form-label">Modal (HPP)</label>
             <div className="mb-amount-input">
               <span>Rp</span>
-              <input inputMode="numeric" value={numHpp ? numHpp.toLocaleString("id-ID") : ""} onChange={(e) => setHpp(e.target.value)} />
+              <RupiahInput value={hpp} onChange={setHpp} />
             </div>
           </div>
         </div>
@@ -925,7 +1054,7 @@ function EditTxForm({ tx, onSubmit }) {
           <label className="mb-form-label">Jumlah</label>
           <div className="mb-amount-input" style={{ marginBottom: 16 }}>
             <span>Rp</span>
-            <input inputMode="numeric" value={numAmount ? numAmount.toLocaleString("id-ID") : ""} onChange={(e) => setAmount(e.target.value)} />
+            <RupiahInput value={amount} onChange={setAmount} />
           </div>
         </>
       )}
