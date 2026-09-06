@@ -160,14 +160,23 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
     }
   });
 
-  const expenseTx = dayTx.filter((tx) => tx.type === "pengeluaran" || tx.type === "tarik_keuntungan");
+  // Uang Modal (Dompet Modal) = belanja bahan baku, dsb. Ditampilkan di Rincian
+  // Pengeluaran dengan keterangan "Belanja Bahan", TAPI tidak mengurangi Serahan.
+  const belanjaBahanTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
+  const belanjaBahanTotal = belanjaBahanTx.reduce((s, tx) => s + tx.amount, 0);
+
+  // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
+  // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
+  const expenseTx = dayTx.filter(
+    (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
+  );
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
 
-  return { catList, catTotals, lainnya, omset, expenseTx, keluaran };
+  return { catList, catTotals, lainnya, omset, expenseTx, keluaran, belanjaBahanTotal };
 }
 
 function buildLaporanText({ inputDate, transactions, products, serahanOverride }) {
-  const { catList, catTotals, lainnya, omset, expenseTx, keluaran } = computeLaporanNumbers({
+  const { catList, catTotals, lainnya, omset, expenseTx, keluaran, belanjaBahanTotal } = computeLaporanNumbers({
     inputDate,
     transactions,
     products,
@@ -182,15 +191,16 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
     .concat(lainnya > 0 ? [`- ${"Lainnya".padEnd(labelWidth)}= ${fmtAngka(lainnya)}`] : [])
     .join("\n");
 
-  const expLabelWidth = Math.max(14, ...expenseTx.map((tx) => (tx.note || "Pengeluaran").length)) + 1;
-  const expenseLinesText = expenseTx.length
-    ? expenseTx
-        .map((tx) => {
-          const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
-          return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
-        })
-        .join("\n")
-    : "(Tiada pengeluaran)";
+  const expLabels = expenseTx.map((tx) => tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"));
+  const expLabelWidth = Math.max(14, "Belanja Bahan".length, ...expLabels.map((l) => l.length)) + 1;
+  const expenseLines = expenseTx.map((tx) => {
+    const label = tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran");
+    return `${label.padEnd(expLabelWidth)}= ${fmtAngka(tx.amount)}`;
+  });
+  if (belanjaBahanTotal > 0) {
+    expenseLines.push(`${"Belanja Bahan".padEnd(expLabelWidth)}= ${fmtAngka(belanjaBahanTotal)}`);
+  }
+  const expenseLinesText = expenseLines.length ? expenseLines.join("\n") : "(Tiada pengeluaran)";
 
   const serahanAuto = omset - keluaran;
   const hasOverride = serahanOverride !== null && serahanOverride !== undefined && serahanOverride !== "";
