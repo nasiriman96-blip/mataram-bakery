@@ -172,14 +172,16 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
   // tetap ditampilkan di laporan untuk informasi, TAPI tidak mengurangi Serahan.
   const modalExpenseTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
 
-  // Transfer antar dompet TIDAK ditampilkan sebagai baris di laporan, tapi kalau
-  // transfer KELUAR dari Dompet Keuntungan, nominalnya tetap mengurangi Serahan
-  // (karena uang itu sudah tidak ada lagi di Dompet Keuntungan hari itu).
+  // Transfer antar dompet TIDAK ditampilkan sebagai baris tersendiri di laporan.
+  // Tapi kalau transfer KELUAR dari Dompet Keuntungan (mis. Keuntungan -> Modal),
+  // nominalnya digabung ke "Belanja Bahan" supaya tetap kelihatan (tidak
+  // tersembunyi), dan tetap tidak mengurangi Serahan secara terpisah.
   const transferKeluarKeuntungan = dayTx
     .filter((tx) => tx.type === "transfer" && tx.from === "keuntungan")
     .reduce((s, tx) => s + tx.amount, 0);
+  belanjaBahanTotal += transferKeluarKeuntungan;
 
-  const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0) + transferKeluarKeuntungan;
+  const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
 
   return { catList, catTotals, lainnya, omset, expenseTx, modalExpenseTx, keluaran, belanjaBahanTotal };
 }
