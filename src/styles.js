@@ -178,13 +178,13 @@ button, input, select, textarea {
 
 .mb-form { display:flex; flex-direction:column; }
 .mb-form-helper { font-size:13px; color: var(--ink-soft); margin:-2px 0 10px; }
-.mb-form-label { font-size:13px; font-weight:700; color: var(--ink-soft); margin-bottom:6px; }
+.mb-form-label { display:block; font-size:13px; font-weight:700; color: var(--ink-soft); margin-bottom:6px; }
 .mb-amount-input { display:flex; align-items:center; gap:6px; background: var(--surface); border:1.5px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:10px; transition: border-color .2s ease; }
 .mb-amount-input:focus-within { border-color: var(--accent, var(--gold)); }
 .mb-amount-input span { color: var(--ink-soft); font-weight:600; font-size:15.5px; }
 .mb-amount-input input { border:none; outline:none; background:transparent; font-size:17.5px; font-weight:700; color: var(--ink); width:100%; font-family:inherit; }
 .mb-quick-row { display:flex; gap:8px; margin-bottom:14px; }
-.mb-text-input { border:1.5px solid var(--border); background: var(--surface); border-radius:14px; padding:11px 14px; font-size:14.5px; color: var(--ink); margin-bottom:6px; font-family:inherit; outline:none; }
+.mb-text-input { display:block; width:100%; box-sizing:border-box; border:1.5px solid var(--border); background: var(--surface); border-radius:14px; padding:11px 14px; font-size:14.5px; color: var(--ink); margin-bottom:6px; font-family:inherit; outline:none; }
 .mb-text-input:focus { border-color: var(--gold); }
 
 .mb-segment { display:flex; background: var(--surface-2); border-radius:14px; padding:4px; margin-bottom:14px; }
