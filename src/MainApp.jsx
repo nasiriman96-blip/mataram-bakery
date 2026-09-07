@@ -164,13 +164,10 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
 
   // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
   // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
+  // Pengeluaran dari Dompet Modal TIDAK dimasukkan ke laporan WhatsApp sama sekali.
   const expenseTx = dayTx.filter(
     (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
   );
-
-  // Pengeluaran dari Dompet Modal (mis. bensin, belanja lain2 pakai uang modal):
-  // tetap ditampilkan di laporan untuk informasi, TAPI tidak mengurangi Serahan.
-  const modalExpenseTx = dayTx.filter((tx) => tx.type === "pengeluaran" && tx.wallet === "modal");
 
   // Transfer antar dompet TIDAK ditampilkan sebagai baris tersendiri di laporan.
   // Tapi kalau transfer KELUAR dari Dompet Keuntungan (mis. Keuntungan -> Modal),
@@ -183,11 +180,11 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
 
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
 
-  return { catList, catTotals, lainnya, omset, expenseTx, modalExpenseTx, keluaran, belanjaBahanTotal };
+  return { catList, catTotals, lainnya, omset, expenseTx, keluaran, belanjaBahanTotal };
 }
 
 function buildLaporanText({ inputDate, transactions, products, serahanOverride }) {
-  const { catList, catTotals, lainnya, omset, expenseTx, modalExpenseTx, keluaran, belanjaBahanTotal } = computeLaporanNumbers({
+  const { catList, catTotals, lainnya, omset, expenseTx, keluaran, belanjaBahanTotal } = computeLaporanNumbers({
     inputDate,
     transactions,
     products,
@@ -208,9 +205,6 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
     label: tx.note || (tx.type === "tarik_keuntungan" ? "Tarik Keuntungan" : "Pengeluaran"),
     valueText: fmtAngka(tx.amount),
   }));
-  modalExpenseTx.forEach((tx) => {
-    expEntries.push({ label: tx.note || "Pengeluaran", valueText: fmtAngka(tx.amount) });
-  });
   if (belanjaBahanTotal > 0) {
     expEntries.push({ label: "Belanja Bahan", valueText: fmtAngka(belanjaBahanTotal) });
   }
