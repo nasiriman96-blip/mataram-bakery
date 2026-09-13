@@ -5,7 +5,7 @@ import {
 import {
   Sun, Moon, Plus, Minus, X, Search, ArrowUpRight, ArrowDownLeft,
   Check, ChevronRight, Wallet, LayoutDashboard, ShoppingBag, History,
-  ArrowLeftRight, Cat, Coins, Receipt, LogOut, Send, Copy, Share2, Pencil,
+  ArrowLeftRight, Cat, Coins, Receipt, LogOut, Send, Copy, Share2, Pencil, Calculator,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 
@@ -84,6 +84,12 @@ function todayInputDate() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function combineDateWithNow(dateStr) {
+  const now = new Date();
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
 }
 
 function toLocalDatetimeInputValue(iso) {
@@ -312,10 +318,197 @@ function Sheet({ open, onClose, title, children }) {
   );
 }
 
+function safeCalc(expr) {
+  const cleaned = expr.replace(/[^0-9+\-*/.()]/g, "");
+  if (!cleaned) return null;
+  try {
+    // eslint-disable-next-line no-new-func
+    const result = Function(`"use strict"; return (${cleaned});`)();
+    if (typeof result !== "number" || !isFinite(result)) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function MiniCalculator({ onUse, onClose }) {
+  const [expr, setExpr] = useState("");
+  const preview = expr ? safeCalc(expr) : null;
+
+  function press(val) {
+    if (val === "C") return setExpr("");
+    if (val === "DEL") return setExpr((e) => e.slice(0, -1));
+    if (val === "=") {
+      const r = safeCalc(expr);
+      if (r !== null) setExpr(String(Math.round(r * 100) / 100));
+      return;
+    }
+    setExpr((e) => e + val);
+  }
+
+  const rows = [
+    [{ k: "C", type: "fn" }, { k: "DEL", label: "⌫", type: "fn" }, { k: "00", type: "fn" }, { k: "/", label: "÷", type: "op" }],
+    [{ k: "7" }, { k: "8" }, { k: "9" }, { k: "*", label: "×", type: "op" }],
+    [{ k: "4" }, { k: "5" }, { k: "6" }, { k: "-", label: "−", type: "op" }],
+    [{ k: "1" }, { k: "2" }, { k: "3" }, { k: "+", type: "op" }],
+  ];
+
+  return (
+    <div className="mb-calc-overlay" onClick={onClose}>
+      <div className="mb-calc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-calc-modal-head">
+          <h4>Kalkulator</h4>
+          <button className="mb-calc-close" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        <div className="mb-calc-screen">
+          <div className="mb-calc-expr">{expr || "0"}</div>
+          {preview !== null && preview !== undefined && String(preview) !== expr && (
+            <div className="mb-calc-preview">= Rp {fmtAngka(preview)}</div>
+          )}
+        </div>
+
+        <div className="mb-calc-grid">
+          {rows.flat().map((b) => (
+            <button key={b.k} className={`mb-calc-key ${b.type === "op" ? "op" : b.type === "fn" ? "fn" : ""}`} onClick={() => press(b.k)}>
+              {b.label || b.k}
+            </button>
+          ))}
+          <button
+            className="mb-calc-key"
+            style={{ gridColumn: "span 2", aspectRatio: "auto", borderRadius: 999, justifyContent: "flex-start", paddingLeft: 22 }}
+            onClick={() => press("0")}
+          >
+            0
+          </button>
+          <button className="mb-calc-key" onClick={() => press(".")}>.</button>
+          <button className="mb-calc-key op" onClick={() => press("=")}>=</button>
+        </div>
+
+        <button
+          className="mb-calc-use-btn"
+          disabled={preview === null || preview === undefined}
+          onClick={() => { if (preview !== null) onUse(Math.round(preview)); }}
+        >
+          Gunakan Nominal Ini
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MultiExpenseForm({ onSubmit }) {
+  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
+  const [rows, setRows] = useState([{ id: 1, note: "", amount: "" }]);
+  const [calcFor, setCalcFor] = useState(null);
+
+  function addRow() {
+    setRows((r) => [...r, { id: Date.now(), note: "", amount: "" }]);
+  }
+  function removeRow(id) {
+    setRows((r) => r.filter((row) => row.id !== id));
+  }
+  function updateRow(id, patch) {
+    setRows((r) => r.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  const amountOf = (r) => Number(String(r.amount).replace(/\D/g, "")) || 0;
+  const validRows = rows.filter((r) => amountOf(r) > 0);
+  const total = validRows.reduce((s, r) => s + amountOf(r), 0);
+
+  function handleSubmit() {
+    const isoDate = new Date(dateVal).toISOString();
+    onSubmit(
+      validRows.map((r) => ({
+        type: "pengeluaran",
+        amount: amountOf(r),
+        note: r.note.trim() || null,
+        date: isoDate,
+      }))
+    );
+  }
+
+  return (
+    <div className="mb-form">
+      <label className="mb-form-label">Tanggal & Waktu</label>
+      <input
+        type="datetime-local"
+        className="mb-text-input"
+        style={{ marginBottom: 16 }}
+        value={dateVal}
+        onChange={(e) => setDateVal(e.target.value)}
+      />
+
+      {rows.map((row, idx) => (
+        <div key={row.id} className="mb-expense-row-card">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span className="mb-form-label" style={{ marginBottom: 0 }}>Pengeluaran {idx + 1}</span>
+            {rows.length > 1 && (
+              <button type="button" className="mb-tx-delete" onClick={() => removeRow(row.id)} aria-label="Hapus baris">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <input
+            className="mb-text-input"
+            style={{ marginBottom: 10 }}
+            placeholder="mis. beli bahan baku"
+            value={row.note}
+            onChange={(e) => updateRow(row.id, { note: e.target.value })}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <div className="mb-amount-input" style={{ "--accent": "var(--red)", flex: 1, marginBottom: 0 }}>
+              <span>Rp</span>
+              <RupiahInput value={row.amount} onChange={(v) => updateRow(row.id, { amount: v })} placeholder="0" />
+            </div>
+            <button
+              type="button"
+              className="mb-iconbtn-lg"
+              style={{ flexShrink: 0 }}
+              onClick={() => setCalcFor(row.id)}
+              aria-label="Buka kalkulator"
+            >
+              <Calculator size={18} />
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {calcFor !== null && (
+        <MiniCalculator
+          onUse={(val) => { updateRow(calcFor, { amount: String(val) }); setCalcFor(null); }}
+          onClose={() => setCalcFor(null)}
+        />
+      )}
+
+      <button type="button" className="mb-action-btn gold" style={{ marginBottom: 16 }} onClick={addRow}>
+        <Plus size={16} /> Tambah Pengeluaran Lain
+      </button>
+
+      {validRows.length > 0 && (
+        <div className="mb-summary-row" style={{ marginBottom: 14 }}>
+          <span>Total ({validRows.length} pengeluaran)</span>
+          <span>{rupiah(total)}</span>
+        </div>
+      )}
+
+      <button
+        className="mb-submit-btn"
+        style={{ "--accent": "var(--red)" }}
+        disabled={validRows.length === 0}
+        onClick={handleSubmit}
+      >
+        {validRows.length > 1 ? `Catat ${validRows.length} Pengeluaran` : "Catat Pengeluaran"}
+      </button>
+    </div>
+  );
+}
+
 function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, helper }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
+  const [showCalc, setShowCalc] = useState(false);
   const numeric = Number(amount.replace(/\D/g, "")) || 0;
 
   return (
@@ -330,10 +523,27 @@ function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, h
         onChange={(e) => setDateVal(e.target.value)}
       />
       <label className="mb-form-label">Jumlah</label>
-      <div className="mb-amount-input" style={{ "--accent": accent }}>
-        <span>Rp</span>
-        <RupiahInput value={amount} onChange={setAmount} placeholder="0" />
+      <div style={{ display: "flex", gap: 8 }}>
+        <div className="mb-amount-input" style={{ "--accent": accent, flex: 1, marginBottom: 0 }}>
+          <span>Rp</span>
+          <RupiahInput value={amount} onChange={setAmount} placeholder="0" />
+        </div>
+        <button
+          type="button"
+          className="mb-iconbtn-lg"
+          style={{ flexShrink: 0 }}
+          onClick={() => setShowCalc(true)}
+          aria-label="Buka kalkulator"
+        >
+          <Calculator size={18} />
+        </button>
       </div>
+      {showCalc && (
+        <MiniCalculator
+          onUse={(val) => { setAmount(String(val)); setShowCalc(false); }}
+          onClose={() => setShowCalc(false)}
+        />
+      )}
       <div className="mb-quick-row">
         {quickAmounts.map((q) => (
           <button key={q} className="mb-chip" onClick={() => setAmount(String(q))}>
@@ -405,7 +615,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     };
   }, []);
   const [cart, setCart] = useState([]);
-  const [saleDate, setSaleDate] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
+  const [saleDate, setSaleDate] = useState(todayInputDate());
   const [sheet, setSheet] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
   const [lastSale, setLastSale] = useState(null);
@@ -498,7 +708,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     if (cartItems.length === 0) return;
     const payload = {
       type: "penjualan",
-      date: new Date(saleDate).toISOString(),
+      date: combineDateWithNow(saleDate),
       total: cartTotal,
       hpp: cartCost,
       profit: cartTotal - cartCost,
@@ -513,7 +723,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     setTransactions((prev) => [data, ...prev]);
     setLastSale(data);
     setCart([]);
-    setSaleDate(toLocalDatetimeInputValue(new Date().toISOString()));
+    setSaleDate(todayInputDate());
     setSheet("success");
   }
 
@@ -525,6 +735,17 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       return;
     }
     setTransactions((prev) => [data, ...prev]);
+  }
+
+  async function pushManyTx(txList) {
+    if (txList.length === 0) return;
+    const payloads = txList.map((tx) => ({ date: new Date().toISOString(), created_by: userId, ...tx }));
+    const { data, error } = await supabase.from("transactions").insert(payloads).select();
+    if (error) {
+      alert("Gagal menyimpan transaksi: " + error.message);
+      return;
+    }
+    setTransactions((prev) => [...data, ...prev]);
   }
 
   async function deleteTransaction(id) {
@@ -720,14 +941,16 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
               <Plus size={16} /> Tambah Item Manual
             </button>
             <div className="mb-cart-summary">
-              <label className="mb-form-label">Tanggal & Waktu Transaksi</label>
-              <input
-                type="datetime-local"
-                className="mb-text-input"
-                style={{ marginBottom: 12 }}
-                value={saleDate}
-                onChange={(e) => setSaleDate(e.target.value)}
-              />
+              <div style={{ display: "flex", flexDirection: "column", marginBottom: 12 }}>
+                <label className="mb-form-label">Tanggal Transaksi</label>
+                <input
+                  type="date"
+                  className="mb-text-input"
+                  style={{ marginBottom: 0 }}
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
+                />
+              </div>
               <div className="mb-summary-row"><span>Subtotal</span><span>{rupiah(cartTotal)}</span></div>
               <div className="mb-summary-row muted"><span>Estimasi keuntungan</span><span>{rupiah(cartTotal - cartCost)}</span></div>
               <button className="mb-submit-btn" style={{ "--accent": "var(--gold)" }} onClick={checkout}>
@@ -788,12 +1011,11 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           <button className={expenseWallet === "modal" ? "active" : ""} onClick={() => setExpenseWallet("modal")}>Dompet Modal</button>
           <button className={expenseWallet === "keuntungan" ? "active" : ""} onClick={() => setExpenseWallet("keuntungan")}>Dompet Keuntungan</button>
         </div>
-        <AmountForm
-          accent="var(--red)"
-          quickAmounts={[25000, 50000, 100000, 250000]}
-          noteholder="mis. beli bahan baku"
-          submitLabel="Catat Pengeluaran"
-          onSubmit={(amount, note, dateIso) => { pushTx({ type: "pengeluaran", amount, note, wallet: expenseWallet, date: dateIso }); setSheet(null); }}
+        <MultiExpenseForm
+          onSubmit={(list) => {
+            pushManyTx(list.map((item) => ({ ...item, wallet: expenseWallet })));
+            setSheet(null);
+          }}
         />
       </Sheet>
 

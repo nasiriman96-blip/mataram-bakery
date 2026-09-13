@@ -285,4 +285,38 @@ button, input, select, textarea {
   display:flex; align-items:center; justify-content:center; cursor:pointer; transition: transform .15s ease;
 }
 .mb-iconbtn-lg:active { transform: scale(0.9); }
+
+/* Tambahan: kalkulator melayang di form Jumlah */
+.mb-calc-overlay {
+  position: fixed; inset: 0; background: rgba(20,14,8,0.55); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: fadeSlideUp .2s ease;
+}
+.mb-calc-modal {
+  background: var(--surface); border-radius: 24px; padding: 18px; width: 100%; max-width: 340px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+}
+.mb-calc-modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.mb-calc-modal-head h4 { margin:0; font-size:16px; font-weight:700; }
+.mb-calc-close { width:30px; height:30px; border-radius:50%; background: var(--surface-2); color: var(--ink); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.mb-calc-screen { text-align: right; padding: 10px 8px 16px; background: var(--ink); border-radius: 14px; margin-bottom: 14px; }
+.mb-calc-expr { font-size: 24px; font-weight: 700; color: #fff; word-break: break-all; line-height: 1.2; padding: 0 6px; }
+.mb-calc-preview { font-size: 13px; color: rgba(255,255,255,0.55); margin-top: 4px; padding: 0 6px; }
+.mb-calc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.mb-calc-key {
+  background: var(--surface-2); color: var(--ink); border: none; border-radius: 50%;
+  aspect-ratio: 1; font-size: 18px; font-weight: 600; cursor: pointer; transition: transform .12s ease, background .15s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.mb-calc-key.fn { background: var(--red-soft); color: var(--red); font-size: 15px; }
+.mb-calc-key.op { background: var(--gold); color: #fff; font-size: 21px; }
+.mb-calc-key:active { transform: scale(0.88); filter: brightness(1.08); }
+.mb-calc-use-btn {
+  width: 100%; padding: 14px; border-radius: 14px; background: var(--gold); color: #fff;
+  font-size: 14.5px; font-weight: 700; cursor: pointer; transition: opacity .2s ease;
+}
+.mb-calc-use-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Tambahan: kartu baris pada Pengeluaran multi-baris */
+.mb-expense-row-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 12px; margin-bottom: 12px; }
 `;
