@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  AreaChart, Area, XAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
   Sun, Moon, Plus, Minus, X, Search, ArrowUpRight, ArrowDownLeft,
@@ -15,9 +15,16 @@ import { supabase } from "./lib/supabaseClient";
 
 const CATEGORIES = [
   { id: "semua", label: "Semua" },
-  { id: "bolu", label: "Bolu" },
-  { id: "donat", label: "Donat" },
   { id: "zuppa", label: "Zuppa" },
+  { id: "donat", label: "Donat" },
+];
+
+// 4 dompet: masing-masing kategori (Zuppa, Donat) punya Modal & Untung sendiri.
+const WALLETS = [
+  { id: "zuppa_modal", label: "Zuppa Modal", category: "zuppa", kind: "modal" },
+  { id: "zuppa_untung", label: "Zuppa Untung", category: "zuppa", kind: "untung" },
+  { id: "donat_modal", label: "Donat Modal", category: "donat", kind: "modal" },
+  { id: "donat_untung", label: "Donat Untung", category: "donat", kind: "untung" },
 ];
 
 /* ---------------------------------------------------------------- */
@@ -26,17 +33,40 @@ const CATEGORIES = [
 
 const rupiah = (n) => "Rp" + Math.round(n || 0).toLocaleString("id-ID");
 
-function walletDelta(tx, wallet) {
+function walletLabel(id) {
+  const w = WALLETS.find((w) => w.id === id);
+  return w ? w.label : id;
+}
+
+function walletDelta(tx, walletId) {
+  const wallet = WALLETS.find((w) => w.id === walletId);
+  if (!wallet) return null;
+  const { category, kind } = wallet;
+
   if (tx.type === "penjualan") {
-    if (wallet === "modal") return { amount: tx.hpp, dir: "in" };
-    return { amount: tx.profit, dir: "in" };
+    const items = (tx.items || []).filter((it) => it.category === category);
+    if (items.length === 0) return null;
+    if (kind === "modal") {
+      const hpp = items.reduce((s, it) => s + (it.cost || 0) * it.qty, 0);
+      if (hpp <= 0) return null;
+      return { amount: hpp, dir: "in" };
+    }
+    const profit = items.reduce((s, it) => s + (it.price - (it.cost || 0)) * it.qty, 0);
+    if (profit <= 0) return null;
+    return { amount: profit, dir: "in" };
   }
-  if (tx.type === "setor_modal" && wallet === "modal") return { amount: tx.amount, dir: "in" };
-  if (tx.type === "tarik_keuntungan" && wallet === "keuntungan") return { amount: tx.amount, dir: "out" };
-  if (tx.type === "pengeluaran" && tx.wallet === wallet) return { amount: tx.amount, dir: "out" };
+  if (tx.type === "setor_modal" && kind === "modal" && tx.category === category) {
+    return { amount: tx.amount, dir: "in" };
+  }
+  if (tx.type === "tarik_keuntungan" && kind === "untung" && tx.category === category) {
+    return { amount: tx.amount, dir: "out" };
+  }
+  if (tx.type === "pengeluaran" && tx.wallet === walletId) {
+    return { amount: tx.amount, dir: "out" };
+  }
   if (tx.type === "transfer") {
-    if (tx.from === wallet) return { amount: tx.amount, dir: "out" };
-    if (tx.to === wallet) return { amount: tx.amount, dir: "in" };
+    if (tx.from === walletId) return { amount: tx.amount, dir: "out" };
+    if (tx.to === walletId) return { amount: tx.amount, dir: "in" };
   }
   return null;
 }
@@ -46,13 +76,13 @@ function txMeta(tx) {
     case "penjualan":
       return { label: "Penjualan", sub: `${tx.items.length} item`, icon: ShoppingBag, amount: tx.total, dir: "in" };
     case "setor_modal":
-      return { label: "Setor Modal", sub: tx.note || "Tambahan modal", icon: Cat, amount: tx.amount, dir: "in" };
+      return { label: "Setor Modal", sub: tx.note || `Modal ${tx.category === "zuppa" ? "Zuppa" : "Donat"}`, icon: Cat, amount: tx.amount, dir: "in" };
     case "tarik_keuntungan":
-      return { label: "Tarik Keuntungan", sub: tx.note || "Penarikan", icon: Coins, amount: tx.amount, dir: "out" };
+      return { label: "Tarik Keuntungan", sub: tx.note || `Untung ${tx.category === "zuppa" ? "Zuppa" : "Donat"}`, icon: Coins, amount: tx.amount, dir: "out" };
     case "pengeluaran":
-      return { label: "Pengeluaran", sub: tx.note || (tx.wallet === "modal" ? "Dompet Modal" : "Dompet Keuntungan"), icon: Receipt, amount: tx.amount, dir: "out" };
+      return { label: "Pengeluaran", sub: tx.note || walletLabel(tx.wallet), icon: Receipt, amount: tx.amount, dir: "out" };
     case "transfer":
-      return { label: "Transfer Antar Dompet", sub: `${tx.from === "modal" ? "Modal" : "Keuntungan"} → ${tx.to === "modal" ? "Modal" : "Keuntungan"}`, icon: ArrowLeftRight, amount: tx.amount, dir: "neutral" };
+      return { label: "Transfer Antar Dompet", sub: `${walletLabel(tx.from)} → ${walletLabel(tx.to)}`, icon: ArrowLeftRight, amount: tx.amount, dir: "neutral" };
     default:
       return { label: "Transaksi", sub: "", icon: Receipt, amount: 0, dir: "neutral" };
   }
@@ -90,6 +120,12 @@ function combineDateWithNow(dateStr) {
   const now = new Date();
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+}
+
+function combineDateWithTime(dateStr, timeSourceIso) {
+  const t = new Date(timeSourceIso);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d, t.getHours(), t.getMinutes(), t.getSeconds()).toISOString();
 }
 
 function toLocalDatetimeInputValue(iso) {
@@ -168,21 +204,22 @@ function computeLaporanNumbers({ inputDate, transactions, products }) {
     }
   });
 
-  // Serahan hanya berasal dari Dompet Keuntungan: pengeluaran dari Dompet
-  // Keuntungan + Tarik Keuntungan yang mengurangi jumlah yang diserahkan.
-  // Pengeluaran dari Dompet Modal TIDAK dimasukkan ke laporan WhatsApp sama sekali.
+  // Serahan hanya berasal dari dompet Untung (Zuppa Untung + Donat Untung):
+  // pengeluaran dari dompet Untung + Tarik Keuntungan mengurangi jumlah yang
+  // diserahkan. Pengeluaran dari dompet Modal TIDAK dimasukkan ke laporan sama sekali.
+  const isModalWallet = (id) => WALLETS.find((w) => w.id === id)?.kind === "modal";
   const expenseTx = dayTx.filter(
-    (tx) => (tx.type === "pengeluaran" && tx.wallet !== "modal") || tx.type === "tarik_keuntungan"
+    (tx) => (tx.type === "pengeluaran" && !isModalWallet(tx.wallet)) || tx.type === "tarik_keuntungan"
   );
 
   // Transfer antar dompet TIDAK ditampilkan sebagai baris tersendiri di laporan.
-  // Tapi kalau transfer KELUAR dari Dompet Keuntungan (mis. Keuntungan -> Modal),
+  // Tapi kalau transfer KELUAR dari dompet Untung manapun (Zuppa/Donat Untung),
   // nominalnya digabung ke "Belanja Bahan" supaya tetap kelihatan (tidak
   // tersembunyi), dan tetap tidak mengurangi Serahan secara terpisah.
-  const transferKeluarKeuntungan = dayTx
-    .filter((tx) => tx.type === "transfer" && tx.from === "keuntungan")
+  const transferKeluarUntung = dayTx
+    .filter((tx) => tx.type === "transfer" && !isModalWallet(tx.from) && tx.from)
     .reduce((s, tx) => s + tx.amount, 0);
-  belanjaBahanTotal += transferKeluarKeuntungan;
+  belanjaBahanTotal += transferKeluarUntung;
 
   const keluaran = expenseTx.reduce((s, tx) => s + tx.amount, 0);
 
@@ -238,7 +275,7 @@ function buildLaporanText({ inputDate, transactions, products, serahanOverride }
 _LAPORAN OMSET PREMIS_
 \`\`\`
 TARIKH : ${formatTanggalLaporan(inputDate)}
-UNIT   : MATARAM BAKERY
+UNIT   : ZUPPA & DONAT
 ${catLines}
 •••••••••••••••••••••
 Rincian Pengeluaran :
@@ -318,6 +355,14 @@ function Sheet({ open, onClose, title, children }) {
   );
 }
 
+function formatExprDisplay(expr) {
+  return expr.replace(/\d+(\.\d+)?/g, (numStr) => {
+    const [intPart, decPart] = numStr.split(".");
+    const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return decPart !== undefined ? `${grouped},${decPart}` : grouped;
+  });
+}
+
 function safeCalc(expr) {
   const cleaned = expr.replace(/[^0-9+\-*/.()]/g, "");
   if (!cleaned) return null;
@@ -362,7 +407,7 @@ function MiniCalculator({ onUse, onClose }) {
         </div>
 
         <div className="mb-calc-screen">
-          <div className="mb-calc-expr">{expr || "0"}</div>
+          <div className="mb-calc-expr">{expr ? formatExprDisplay(expr) : "0"}</div>
           {preview !== null && preview !== undefined && String(preview) !== expr && (
             <div className="mb-calc-preview">= Rp {fmtAngka(preview)}</div>
           )}
@@ -398,7 +443,7 @@ function MiniCalculator({ onUse, onClose }) {
 }
 
 function MultiExpenseForm({ onSubmit }) {
-  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
+  const [dateVal, setDateVal] = useState(todayInputDate());
   const [rows, setRows] = useState([{ id: 1, note: "", amount: "" }]);
   const [calcFor, setCalcFor] = useState(null);
 
@@ -417,7 +462,7 @@ function MultiExpenseForm({ onSubmit }) {
   const total = validRows.reduce((s, r) => s + amountOf(r), 0);
 
   function handleSubmit() {
-    const isoDate = new Date(dateVal).toISOString();
+    const isoDate = combineDateWithNow(dateVal);
     onSubmit(
       validRows.map((r) => ({
         type: "pengeluaran",
@@ -430,9 +475,9 @@ function MultiExpenseForm({ onSubmit }) {
 
   return (
     <div className="mb-form">
-      <label className="mb-form-label">Tanggal & Waktu</label>
+      <label className="mb-form-label">Tanggal</label>
       <input
-        type="datetime-local"
+        type="date"
         className="mb-text-input"
         style={{ marginBottom: 16 }}
         value={dateVal}
@@ -507,16 +552,16 @@ function MultiExpenseForm({ onSubmit }) {
 function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, helper }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(new Date().toISOString()));
+  const [dateVal, setDateVal] = useState(todayInputDate());
   const [showCalc, setShowCalc] = useState(false);
   const numeric = Number(amount.replace(/\D/g, "")) || 0;
 
   return (
     <div className="mb-form">
       {helper && <p className="mb-form-helper">{helper}</p>}
-      <label className="mb-form-label">Tanggal & Waktu</label>
+      <label className="mb-form-label">Tanggal</label>
       <input
-        type="datetime-local"
+        type="date"
         className="mb-text-input"
         style={{ marginBottom: 14 }}
         value={dateVal}
@@ -544,21 +589,14 @@ function AmountForm({ accent, quickAmounts, noteholder, submitLabel, onSubmit, h
           onClose={() => setShowCalc(false)}
         />
       )}
-      <div className="mb-quick-row">
-        {quickAmounts.map((q) => (
-          <button key={q} className="mb-chip" onClick={() => setAmount(String(q))}>
-            {q >= 1000000 ? `${q / 1000000}jt` : `${q / 1000}rb`}
-          </button>
-        ))}
-      </div>
-      <label className="mb-form-label">Catatan (opsional)</label>
+      <label className="mb-form-label" style={{ marginTop: 14 }}>Catatan (opsional)</label>
       <input className="mb-text-input" placeholder={noteholder} value={note} onChange={(e) => setNote(e.target.value)} />
       <button
         className="mb-submit-btn"
         style={{ "--accent": accent }}
         disabled={numeric <= 0}
         onClick={() => {
-          onSubmit(numeric, note, new Date(dateVal).toISOString());
+          onSubmit(numeric, note, combineDateWithNow(dateVal));
           setAmount("");
           setNote("");
         }}
@@ -587,7 +625,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   useEffect(() => {
     let active = true;
     supabase
-      .from("products")
+      .from("zd_products")
       .select("*")
       .order("id", { ascending: true })
       .then(({ data, error }) => {
@@ -603,7 +641,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   useEffect(() => {
     let active = true;
     supabase
-      .from("transactions")
+      .from("zd_transactions")
       .select("*")
       .order("date", { ascending: false })
       .then(({ data, error }) => {
@@ -621,23 +659,23 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   const [lastSale, setLastSale] = useState(null);
   const [category, setCategory] = useState("semua");
   const [query, setQuery] = useState("");
-  const [walletTab, setWalletTab] = useState("modal");
-  const [expenseWallet, setExpenseWallet] = useState("modal");
-  const [transferDir, setTransferDir] = useState("modal_to_keuntungan");
+  const [walletTab, setWalletTab] = useState("zuppa_modal");
+  const [expenseWallet, setExpenseWallet] = useState("zuppa_modal");
+  const [modalCategory, setModalCategory] = useState("zuppa");
+  const [untungCategory, setUntungCategory] = useState("zuppa");
+  const [transferFrom, setTransferFrom] = useState("zuppa_modal");
+  const [transferTo, setTransferTo] = useState("zuppa_untung");
 
   const wallets = useMemo(() => {
-    let modal = 0, keuntungan = 0;
+    const balances = {};
+    WALLETS.forEach((w) => { balances[w.id] = 0; });
     transactions.forEach((tx) => {
-      if (tx.type === "penjualan") { modal += tx.hpp; keuntungan += tx.profit; }
-      else if (tx.type === "setor_modal") modal += tx.amount;
-      else if (tx.type === "tarik_keuntungan") keuntungan -= tx.amount;
-      else if (tx.type === "pengeluaran") { if (tx.wallet === "modal") modal -= tx.amount; else keuntungan -= tx.amount; }
-      else if (tx.type === "transfer") {
-        if (tx.from === "modal") modal -= tx.amount; else keuntungan -= tx.amount;
-        if (tx.to === "modal") modal += tx.amount; else keuntungan += tx.amount;
-      }
+      WALLETS.forEach((w) => {
+        const d = walletDelta(tx, w.id);
+        if (d) balances[w.id] += d.dir === "in" ? d.amount : -d.amount;
+      });
     });
-    return { modal, keuntungan };
+    return balances;
   }, [transactions]);
 
   const chartData = useMemo(() => {
@@ -677,6 +715,19 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     return transactions.filter((tx) => tx.type === "penjualan" && new Date(tx.date).toDateString() === today).length;
   }, [transactions]);
 
+  const categoryToday = useMemo(() => {
+    const today = new Date().toDateString();
+    const totals = { zuppa: 0, donat: 0 };
+    transactions
+      .filter((tx) => tx.type === "penjualan" && new Date(tx.date).toDateString() === today)
+      .forEach((tx) => {
+        (tx.items || []).forEach((it) => {
+          if (totals[it.category] !== undefined) totals[it.category] += it.price * it.qty;
+        });
+      });
+    return totals;
+  }, [transactions]);
+
   const cartItems = cart.map((c) => {
     if (c.manual) return { id: c.id, name: c.name, price: c.price, cost: c.cost || 0, kind: "manual", qty: c.qty };
     return { ...(products.find((p) => p.id === c.id) || {}), qty: c.qty };
@@ -692,9 +743,9 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       return [...prev, { id, qty: 1 }];
     });
   }
-  function addManualItem({ name, price, cost, qty }) {
+  function addManualItem({ name, price, cost, qty, category }) {
     const id = `manual-${Date.now()}`;
-    setCart((prev) => [...prev, { id, manual: true, name, price, cost: cost || 0, qty: qty || 1 }]);
+    setCart((prev) => [...prev, { id, manual: true, name, price, cost: cost || 0, category, qty: qty || 1 }]);
   }
   function changeQty(id, delta) {
     setCart((prev) =>
@@ -712,10 +763,10 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       total: cartTotal,
       hpp: cartCost,
       profit: cartTotal - cartCost,
-      items: cartItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, price: i.price })),
+      items: cartItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, cost: i.cost || 0, category: i.category })),
       created_by: userId,
     };
-    const { data, error } = await supabase.from("transactions").insert(payload).select().single();
+    const { data, error } = await supabase.from("zd_transactions").insert(payload).select().single();
     if (error) {
       alert("Gagal menyimpan transaksi: " + error.message);
       return;
@@ -729,7 +780,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
 
   async function pushTx(tx) {
     const payload = { date: new Date().toISOString(), created_by: userId, ...tx };
-    const { data, error } = await supabase.from("transactions").insert(payload).select().single();
+    const { data, error } = await supabase.from("zd_transactions").insert(payload).select().single();
     if (error) {
       alert("Gagal menyimpan transaksi: " + error.message);
       return;
@@ -740,7 +791,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   async function pushManyTx(txList) {
     if (txList.length === 0) return;
     const payloads = txList.map((tx) => ({ date: new Date().toISOString(), created_by: userId, ...tx }));
-    const { data, error } = await supabase.from("transactions").insert(payloads).select();
+    const { data, error } = await supabase.from("zd_transactions").insert(payloads).select();
     if (error) {
       alert("Gagal menyimpan transaksi: " + error.message);
       return;
@@ -751,7 +802,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   async function deleteTransaction(id) {
     if (!isAdmin) return;
     if (!window.confirm("Hapus riwayat transaksi ini?")) return;
-    const { error } = await supabase.from("transactions").delete().eq("id", id);
+    const { error } = await supabase.from("zd_transactions").delete().eq("id", id);
     if (error) {
       alert("Gagal menghapus riwayat: " + error.message);
       return;
@@ -762,7 +813,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
   async function deleteAllTransactions() {
     if (!isAdmin) return;
     if (!window.confirm("Hapus SEMUA riwayat transaksi? Tindakan ini tidak bisa dibatalkan.")) return;
-    const { error } = await supabase.from("transactions").delete().gt("id", 0);
+    const { error } = await supabase.from("zd_transactions").delete().gt("id", 0);
     if (error) {
       alert("Gagal menghapus semua riwayat: " + error.message);
       return;
@@ -772,7 +823,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
 
   async function updateTransaction(id, patch) {
     if (!isAdmin) return;
-    const { data, error } = await supabase.from("transactions").update(patch).eq("id", id).select().single();
+    const { data, error } = await supabase.from("zd_transactions").update(patch).eq("id", id).select().single();
     if (error) {
       alert("Gagal menyimpan perubahan riwayat: " + error.message);
       return;
@@ -784,7 +835,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
 
   async function addProduct(p) {
     const payload = { ...p, created_by: userId };
-    const { data, error } = await supabase.from("products").insert(payload).select().single();
+    const { data, error } = await supabase.from("zd_products").insert(payload).select().single();
     if (error) {
       alert("Gagal menambah produk: " + error.message);
       return;
@@ -792,7 +843,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
     setProducts((prev) => [...prev, data]);
   }
   async function deleteProduct(id) {
-    const { error } = await supabase.from("products").delete().eq("id", id);
+    const { error } = await supabase.from("zd_products").delete().eq("id", id);
     if (error) {
       alert("Gagal menghapus produk: " + error.message);
       return;
@@ -826,9 +877,9 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       {/* Header */}
       <div className="mb-header">
         <div className="mb-brand">
-          <div className="mb-logo">M</div>
+          <div className="mb-logo">Z</div>
           <div>
-            <div className="mb-brand-name">Mataram Bakery</div>
+            <div className="mb-brand-name">Zuppa & Donat</div>
             <div className="mb-brand-sub">{userEmail}{isAdmin ? " · Admin" : ""}</div>
           </div>
         </div>
@@ -851,7 +902,9 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
                 chartData={chartData}
                 todayRevenue={todayRevenue}
                 todayCount={todayCount}
+                categoryToday={categoryToday}
                 transactions={transactions.slice(0, 5)}
+                userEmail={userEmail}
               />
             )}
             {tab === "kasir" && (
@@ -986,31 +1039,46 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       </Sheet>
 
       <Sheet open={sheet === "addModal"} onClose={() => setSheet(null)} title="Setor Modal">
+        <div className="mb-segment">
+          <button className={modalCategory === "zuppa" ? "active" : ""} onClick={() => setModalCategory("zuppa")}>Zuppa Modal</button>
+          <button className={modalCategory === "donat" ? "active" : ""} onClick={() => setModalCategory("donat")}>Donat Modal</button>
+        </div>
         <AmountForm
           accent="var(--teal)"
           quickAmounts={[100000, 500000, 1000000, 2000000]}
           noteholder="mis. tambahan modal dari pemilik"
-          submitLabel="Setor ke Dompet Modal"
-          onSubmit={(amount, note, dateIso) => { pushTx({ type: "setor_modal", amount, note, date: dateIso }); setSheet(null); }}
+          submitLabel={`Setor ke ${modalCategory === "zuppa" ? "Zuppa Modal" : "Donat Modal"}`}
+          onSubmit={(amount, note, dateIso) => { pushTx({ type: "setor_modal", amount, note, category: modalCategory, date: dateIso }); setSheet(null); }}
         />
       </Sheet>
 
       <Sheet open={sheet === "withdraw"} onClose={() => setSheet(null)} title="Tarik Keuntungan">
+        <div className="mb-segment">
+          <button className={untungCategory === "zuppa" ? "active" : ""} onClick={() => setUntungCategory("zuppa")}>Zuppa Untung</button>
+          <button className={untungCategory === "donat" ? "active" : ""} onClick={() => setUntungCategory("donat")}>Donat Untung</button>
+        </div>
         <AmountForm
           accent="var(--green)"
           quickAmounts={[50000, 100000, 250000, 500000]}
           noteholder="mis. ambil keuntungan bulanan"
-          submitLabel="Tarik dari Dompet Keuntungan"
-          helper={`Saldo tersedia ${rupiah(wallets.keuntungan)}`}
-          onSubmit={(amount, note, dateIso) => { pushTx({ type: "tarik_keuntungan", amount, note, date: dateIso }); setSheet(null); }}
+          submitLabel={`Tarik dari ${untungCategory === "zuppa" ? "Zuppa Untung" : "Donat Untung"}`}
+          helper={`Saldo tersedia ${rupiah(wallets[untungCategory + "_untung"])}`}
+          onSubmit={(amount, note, dateIso) => { pushTx({ type: "tarik_keuntungan", amount, note, category: untungCategory, date: dateIso }); setSheet(null); }}
         />
       </Sheet>
 
       <Sheet open={sheet === "expense"} onClose={() => setSheet(null)} title="Catat Pengeluaran">
-        <div className="mb-segment">
-          <button className={expenseWallet === "modal" ? "active" : ""} onClick={() => setExpenseWallet("modal")}>Dompet Modal</button>
-          <button className={expenseWallet === "keuntungan" ? "active" : ""} onClick={() => setExpenseWallet("keuntungan")}>Dompet Keuntungan</button>
-        </div>
+        <label className="mb-form-label">Dompet Asal</label>
+        <select
+          className="mb-text-input"
+          style={{ marginBottom: 14 }}
+          value={expenseWallet}
+          onChange={(e) => setExpenseWallet(e.target.value)}
+        >
+          {WALLETS.map((w) => (
+            <option key={w.id} value={w.id}>{w.label}</option>
+          ))}
+        </select>
         <MultiExpenseForm
           onSubmit={(list) => {
             pushManyTx(list.map((item) => ({ ...item, wallet: expenseWallet })));
@@ -1020,9 +1088,23 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
       </Sheet>
 
       <Sheet open={sheet === "transfer"} onClose={() => setSheet(null)} title="Transfer Antar Dompet">
-        <div className="mb-segment">
-          <button className={transferDir === "modal_to_keuntungan" ? "active" : ""} onClick={() => setTransferDir("modal_to_keuntungan")}>Modal → Keuntungan</button>
-          <button className={transferDir === "keuntungan_to_modal" ? "active" : ""} onClick={() => setTransferDir("keuntungan_to_modal")}>Keuntungan → Modal</button>
+        <div className="mb-two-col" style={{ marginBottom: 14 }}>
+          <div>
+            <label className="mb-form-label">Dari</label>
+            <select className="mb-text-input" value={transferFrom} onChange={(e) => setTransferFrom(e.target.value)}>
+              {WALLETS.map((w) => (
+                <option key={w.id} value={w.id}>{w.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-form-label">Ke</label>
+            <select className="mb-text-input" value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
+              {WALLETS.filter((w) => w.id !== transferFrom).map((w) => (
+                <option key={w.id} value={w.id}>{w.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
         <AmountForm
           accent="var(--gold)"
@@ -1030,9 +1112,8 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
           noteholder="mis. penyesuaian saldo"
           submitLabel="Transfer Sekarang"
           onSubmit={(amount, note, dateIso) => {
-            const from = transferDir === "modal_to_keuntungan" ? "modal" : "keuntungan";
-            const to = transferDir === "modal_to_keuntungan" ? "keuntungan" : "modal";
-            pushTx({ type: "transfer", amount, note, from, to, date: dateIso });
+            if (transferFrom === transferTo) { alert("Dompet asal dan tujuan tidak boleh sama."); return; }
+            pushTx({ type: "transfer", amount, note, from: transferFrom, to: transferTo, date: dateIso });
             setSheet(null);
           }}
         />
@@ -1060,7 +1141,7 @@ export default function MainApp({ isAdmin, userEmail, userId, onSignOut, dark, s
 
 function AddProductForm({ onSubmit }) {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("bolu");
+  const [category, setCategory] = useState("zuppa");
   const [kind, setKind] = useState("bread");
   const [cost, setCost] = useState("");
   const [price, setPrice] = useState("");
@@ -1121,6 +1202,7 @@ function AddProductForm({ onSubmit }) {
 
 function ManualItemForm({ onSubmit }) {
   const [name, setName] = useState("");
+  const [category, setCategory] = useState("zuppa");
   const [price, setPrice] = useState("");
   const [cost, setCost] = useState("");
   const [qty, setQty] = useState(1);
@@ -1139,10 +1221,16 @@ function ManualItemForm({ onSubmit }) {
       <input
         className="mb-text-input"
         style={{ marginBottom: 14 }}
-        placeholder="mis. Kue Custom Ulang Tahun"
+        placeholder="mis. Zuppa Jumbo Spesial"
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+
+      <label className="mb-form-label">Kategori</label>
+      <div className="mb-segment" style={{ marginBottom: 14 }}>
+        <button className={category === "zuppa" ? "active" : ""} onClick={() => setCategory("zuppa")}>Zuppa</button>
+        <button className={category === "donat" ? "active" : ""} onClick={() => setCategory("donat")}>Donat</button>
+      </div>
 
       <div className="mb-two-col" style={{ marginBottom: 14 }}>
         <div>
@@ -1172,7 +1260,7 @@ function ManualItemForm({ onSubmit }) {
         className="mb-submit-btn"
         style={{ "--accent": "var(--gold)" }}
         disabled={!valid}
-        onClick={() => onSubmit({ name: name.trim(), price: priceNum, cost: costNum, qty })}
+        onClick={() => onSubmit({ name: name.trim(), category, price: priceNum, cost: costNum, qty })}
       >
         Tambah ke Keranjang
       </button>
@@ -1251,22 +1339,29 @@ function LaporanForm({ transactions, products }) {
   );
 }
 
+function isoToInputDate(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function EditTxForm({ tx, onSubmit }) {
-  const [dateVal, setDateVal] = useState(toLocalDatetimeInputValue(tx.date));
+  const [dateVal, setDateVal] = useState(isoToInputDate(tx.date));
   const [note, setNote] = useState(tx.note || "");
   const [total, setTotal] = useState(String(tx.total || ""));
   const [hpp, setHpp] = useState(String(tx.hpp || ""));
   const [amount, setAmount] = useState(String(tx.amount || ""));
-  const [wallet, setWallet] = useState(tx.wallet || "modal");
-  const [from, setFrom] = useState(tx.from || "modal");
-  const [to, setTo] = useState(tx.to || "keuntungan");
+  const [wallet, setWallet] = useState(tx.wallet || "zuppa_modal");
+  const [from, setFrom] = useState(tx.from || "zuppa_modal");
+  const [to, setTo] = useState(tx.to || "zuppa_untung");
+  const [txCategory, setTxCategory] = useState(tx.category || "zuppa");
 
   const numTotal = Number(String(total).replace(/\D/g, "")) || 0;
   const numHpp = Number(String(hpp).replace(/\D/g, "")) || 0;
   const numAmount = Number(String(amount).replace(/\D/g, "")) || 0;
 
   function handleSubmit() {
-    const isoDate = new Date(dateVal).toISOString();
+    const isoDate = combineDateWithTime(dateVal, tx.date);
     let patch = { date: isoDate, note: note || null };
     if (tx.type === "penjualan") {
       patch = { ...patch, total: numTotal, hpp: numHpp, profit: numTotal - numHpp };
@@ -1274,6 +1369,8 @@ function EditTxForm({ tx, onSubmit }) {
       patch = { ...patch, amount: numAmount, wallet };
     } else if (tx.type === "transfer") {
       patch = { ...patch, amount: numAmount, from, to };
+    } else if (tx.type === "setor_modal" || tx.type === "tarik_keuntungan") {
+      patch = { ...patch, amount: numAmount, category: txCategory };
     } else {
       patch = { ...patch, amount: numAmount };
     }
@@ -1282,9 +1379,9 @@ function EditTxForm({ tx, onSubmit }) {
 
   return (
     <div className="mb-form">
-      <label className="mb-form-label">Tanggal &amp; Waktu</label>
+      <label className="mb-form-label">Tanggal</label>
       <input
-        type="datetime-local"
+        type="date"
         className="mb-text-input"
         style={{ marginBottom: 16 }}
         value={dateVal}
@@ -1318,24 +1415,46 @@ function EditTxForm({ tx, onSubmit }) {
         </>
       )}
 
-      {tx.type === "pengeluaran" && (
+      {(tx.type === "setor_modal" || tx.type === "tarik_keuntungan") && (
         <>
-          <label className="mb-form-label">Dompet</label>
+          <label className="mb-form-label">Kategori</label>
           <div className="mb-segment" style={{ marginBottom: 16 }}>
-            <button className={wallet === "modal" ? "active" : ""} onClick={() => setWallet("modal")}>Dompet Modal</button>
-            <button className={wallet === "keuntungan" ? "active" : ""} onClick={() => setWallet("keuntungan")}>Dompet Keuntungan</button>
+            <button className={txCategory === "zuppa" ? "active" : ""} onClick={() => setTxCategory("zuppa")}>Zuppa</button>
+            <button className={txCategory === "donat" ? "active" : ""} onClick={() => setTxCategory("donat")}>Donat</button>
           </div>
         </>
       )}
 
-      {tx.type === "transfer" && (
+      {tx.type === "pengeluaran" && (
         <>
-          <label className="mb-form-label">Arah Transfer</label>
-          <div className="mb-segment" style={{ marginBottom: 16 }}>
-            <button className={from === "modal" ? "active" : ""} onClick={() => { setFrom("modal"); setTo("keuntungan"); }}>Modal → Keuntungan</button>
-            <button className={from === "keuntungan" ? "active" : ""} onClick={() => { setFrom("keuntungan"); setTo("modal"); }}>Keuntungan → Modal</button>
-          </div>
+          <label className="mb-form-label">Dompet</label>
+          <select className="mb-text-input" style={{ marginBottom: 16 }} value={wallet} onChange={(e) => setWallet(e.target.value)}>
+            {WALLETS.map((w) => (
+              <option key={w.id} value={w.id}>{w.label}</option>
+            ))}
+          </select>
         </>
+      )}
+
+      {tx.type === "transfer" && (
+        <div className="mb-two-col" style={{ marginBottom: 16 }}>
+          <div>
+            <label className="mb-form-label">Dari</label>
+            <select className="mb-text-input" value={from} onChange={(e) => setFrom(e.target.value)}>
+              {WALLETS.map((w) => (
+                <option key={w.id} value={w.id}>{w.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-form-label">Ke</label>
+            <select className="mb-text-input" value={to} onChange={(e) => setTo(e.target.value)}>
+              {WALLETS.filter((w) => w.id !== from).map((w) => (
+                <option key={w.id} value={w.id}>{w.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       )}
 
       <label className="mb-form-label">Catatan</label>
@@ -1358,23 +1477,32 @@ function EditTxForm({ tx, onSubmit }) {
 /* Screens                                                            */
 /* ---------------------------------------------------------------- */
 
-function Dashboard({ wallets, chartData, todayRevenue, todayCount, transactions }) {
+function Dashboard({ wallets, chartData, todayRevenue, todayCount, categoryToday, transactions, userEmail }) {
   const dateStr = new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long" });
+  const totalSaldo = wallets.zuppa_modal + wallets.zuppa_untung + wallets.donat_modal + wallets.donat_untung;
+  const initial = (userEmail || "?").charAt(0).toUpperCase();
+
+  const donutTotal = categoryToday.zuppa + categoryToday.donat;
+  const donutData = [
+    { name: "Zuppa", value: categoryToday.zuppa, color: "var(--gold)" },
+    { name: "Donat", value: categoryToday.donat, color: "var(--teal)" },
+  ];
+
   return (
     <div className="mb-screen">
-      <div className="mb-greeting">
-        <div className="mb-greeting-text">{getGreeting()}</div>
-        <div className="mb-greeting-date">{dateStr}</div>
+      <div className="mb-greeting" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div className="mb-greeting-text">{getGreeting()} 👋</div>
+          <div className="mb-greeting-date">{dateStr}</div>
+        </div>
+        <div className="mb-logo" style={{ width: 40, height: 40 }}>{initial}</div>
       </div>
 
-      <div className="mb-balance-row">
-        <div className="mb-balance-card modal">
-          <div className="mb-balance-top"><Cat size={18} /><span>Modal</span></div>
-          <div className="mb-balance-amount"><AnimatedNumber value={wallets.modal} /></div>
-        </div>
-        <div className="mb-balance-card keuntungan">
-          <div className="mb-balance-top"><Coins size={18} /><span>Keuntungan</span></div>
-          <div className="mb-balance-amount"><AnimatedNumber value={wallets.keuntungan} /></div>
+      <div className="mb-hero-card">
+        <div className="mb-hero-top"><span>Total Saldo Semua Dompet</span></div>
+        <div className="mb-hero-amount"><AnimatedNumber value={totalSaldo} /></div>
+        <div className="mb-hero-sub">
+          <ShoppingBag size={13} /> {todayCount} transaksi hari ini
         </div>
       </div>
 
@@ -1387,6 +1515,34 @@ function Dashboard({ wallets, chartData, todayRevenue, todayCount, transactions 
           <div className="mb-stat-label">Transaksi hari ini</div>
           <div className="mb-stat-value">{todayCount}</div>
         </div>
+      </div>
+
+      <div className="mb-card">
+        <div className="mb-card-head"><h4>Penjualan Hari Ini</h4></div>
+        {donutTotal === 0 ? (
+          <div className="mb-empty" style={{ padding: "18px 0" }}><ShoppingBag size={26} /><p>Belum ada penjualan hari ini</p></div>
+        ) : (
+          <div className="mb-donut-wrap">
+            <div style={{ width: 110, height: 110, flexShrink: 0 }}>
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={donutData} dataKey="value" innerRadius={32} outerRadius={50} paddingAngle={3} stroke="none">
+                    {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mb-donut-legend">
+              {donutData.map((d) => (
+                <div className="mb-donut-legend-row" key={d.name}>
+                  <span className="mb-donut-dot" style={{ background: d.color }} />
+                  <span className="mb-donut-legend-label">{d.name}</span>
+                  <span className="mb-donut-legend-pct">{donutTotal > 0 ? Math.round((d.value / donutTotal) * 100) : 0}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mb-card">
@@ -1420,6 +1576,28 @@ function Dashboard({ wallets, chartData, todayRevenue, todayCount, transactions 
         <div className="mb-legend">
           <span><i style={{ background: "var(--green)" }} />Masuk</span>
           <span><i style={{ background: "var(--red)" }} />Keluar</span>
+        </div>
+      </div>
+
+      <div className="mb-card">
+        <div className="mb-card-head"><h4>Rincian Saldo Dompet</h4></div>
+        <div className="mb-balance-row">
+          <div className="mb-balance-card zuppa_modal">
+            <div className="mb-balance-top"><Cat size={18} /><span>Zuppa Modal</span></div>
+            <div className="mb-balance-amount"><AnimatedNumber value={wallets.zuppa_modal} /></div>
+          </div>
+          <div className="mb-balance-card zuppa_untung">
+            <div className="mb-balance-top"><Coins size={18} /><span>Zuppa Untung</span></div>
+            <div className="mb-balance-amount"><AnimatedNumber value={wallets.zuppa_untung} /></div>
+          </div>
+          <div className="mb-balance-card donat_modal">
+            <div className="mb-balance-top"><Cat size={18} /><span>Donat Modal</span></div>
+            <div className="mb-balance-amount"><AnimatedNumber value={wallets.donat_modal} /></div>
+          </div>
+          <div className="mb-balance-card donat_untung">
+            <div className="mb-balance-top"><Coins size={18} /><span>Donat Untung</span></div>
+            <div className="mb-balance-amount"><AnimatedNumber value={wallets.donat_untung} /></div>
+          </div>
         </div>
       </div>
 
@@ -1479,21 +1657,28 @@ function Kasir({ query, setQuery, category, setCategory, products, addToCart, on
 }
 
 function Dompet({ wallets, walletTab, setWalletTab, walletTxs, onOpenSheet }) {
+  const selectedWallet = WALLETS.find((w) => w.id === walletTab);
+  const icons = { zuppa_modal: Cat, zuppa_untung: Coins, donat_modal: Cat, donat_untung: Coins };
   return (
     <div className="mb-screen">
       <div className="mb-wallet-cards">
-        <div className={`mb-wallet-card modal ${walletTab === "modal" ? "sel" : ""}`} onClick={() => setWalletTab("modal")}>
-          <div className="mb-wallet-top"><Cat size={20} /><span>Dompet Modal</span></div>
-          <div className="mb-wallet-balance"><AnimatedNumber value={wallets.modal} /></div>
-        </div>
-        <div className={`mb-wallet-card keuntungan ${walletTab === "keuntungan" ? "sel" : ""}`} onClick={() => setWalletTab("keuntungan")}>
-          <div className="mb-wallet-top"><Coins size={20} /><span>Dompet Keuntungan</span></div>
-          <div className="mb-wallet-balance"><AnimatedNumber value={wallets.keuntungan} /></div>
-        </div>
+        {WALLETS.map((w) => {
+          const Icon = icons[w.id];
+          return (
+            <div
+              key={w.id}
+              className={`mb-wallet-card ${w.id} ${walletTab === w.id ? "sel" : ""}`}
+              onClick={() => setWalletTab(w.id)}
+            >
+              <div className="mb-wallet-top"><Icon size={18} /><span>{w.label}</span></div>
+              <div className="mb-wallet-balance"><AnimatedNumber value={wallets[w.id]} /></div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="mb-action-row">
-        {walletTab === "modal" ? (
+        {selectedWallet.kind === "modal" ? (
           <button className="mb-action-btn teal" onClick={() => onOpenSheet("addModal")}><ArrowDownLeft size={16} /> Setor Modal</button>
         ) : (
           <button className="mb-action-btn green" onClick={() => onOpenSheet("withdraw")}><ArrowUpRight size={16} /> Tarik Untung</button>
@@ -1503,7 +1688,7 @@ function Dompet({ wallets, walletTab, setWalletTab, walletTxs, onOpenSheet }) {
       </div>
 
       <div className="mb-card">
-        <div className="mb-card-head"><h4>Riwayat {walletTab === "modal" ? "Dompet Modal" : "Dompet Keuntungan"}</h4></div>
+        <div className="mb-card-head"><h4>Riwayat {selectedWallet.label}</h4></div>
         {walletTxs.length === 0 ? (
           <div className="mb-empty"><Wallet size={28} /><p>Belum ada transaksi</p></div>
         ) : (
